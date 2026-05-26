@@ -27,6 +27,8 @@ RECIPIENT           = os.getenv("RECIPIENT_EMAIL")
 TRUMP_TRUTH_ID      = "107780257626128497"
 DB_PATH             = "alerts.db"
 LOOKBACK_HOURS      = 24  # 24h-Fenster – SQLite-Dedup verhindert Doppel-Alerts
+MAX_ALERTS_PER_RUN  = 15  # Schutz vor Kosten-Explosion bei Breaking-News-Wellen
+MAX_TICKERS_PER_ARTICLE = 3  # max. Tickers pro Artikel, Priorität: hoch > niedrig
 
 # ─────────────────────────────────────────────
 # VALIDATE REQUIRED SECRETS
@@ -274,7 +276,6 @@ def fetch_whitehouse() -> list:
 # ─────────────────────────────────────────────
 TRUMP_HOLDINGS = {
     "DJT":  "JA – Trump hält ~57% an Trump Media & Technology Group (DJT), Quelle: SEC Form 4 / OGE 2024",
-    "DWAC": "JA – war Hauptaktionär vor DWAC/DJT-Merger (abgeschlossen März 2024)",
 }
 def trump_holding_info(ticker: str) -> str:
     return TRUMP_HOLDINGS.get(ticker.upper(),
@@ -375,7 +376,6 @@ Konfidenz: [hoch / mittel / niedrig – kombiniert aus Erkennungs-Konfidenz ({co
             model="claude-sonnet-4-6",
             max_tokens=600,
             temperature=0.2,
-            output_config={"effort": "medium"},
             messages=[{"role": "user", "content": prompt}],
         )
         alert_text = response.content[0].text
@@ -431,9 +431,22 @@ def main():
 
     processed = 0
 
+    def _cap_reached() -> bool:
+        if processed >= MAX_ALERTS_PER_RUN:
+            print(f"  ⚠️  Alert-Cap ({MAX_ALERTS_PER_RUN}) erreicht – Rest übersprungen.")
+            return True
+        return False
+
+    def _sorted_tickers(tickers):
+        high = [(t, c) for t, c in tickers if c == "hoch"]
+        low  = [(t, c) for t, c in tickers if c != "hoch"]
+        return (high + low)[:MAX_TICKERS_PER_ARTICLE]
+
     # ── Truth Social ──────────────────────────────────────────────────
     print("📡 Truth Social …")
     for post in fetch_truth_social():
+        if _cap_reached():
+            break
         text = post.get("text", post.get("content", ""))
         if not text:
             continue
@@ -446,7 +459,9 @@ def main():
         if not tickers:
             continue
         url = post.get("url", post.get("uri", "https://truthsocial.com/@realDonaldTrump"))
-        for ticker, confidence in tickers:
+        for ticker, confidence in _sorted_tickers(tickers):
+            if _cap_reached():
+                break
             h = get_hash(text + ticker)
             if already_seen(h):
                 continue
@@ -456,6 +471,8 @@ def main():
     # ── Nachrichten-RSS (Google News + Finanz-Feeds) ──────────────────
     print("\n📰 Nachrichten-RSS …")
     for article in fetch_gnews_rss() + fetch_financial_rss():
+        if _cap_reached():
+            break
         text = ((article.get("title") or "") + " " + (article.get("description") or "")).strip()
         if not text:
             continue
@@ -466,7 +483,9 @@ def main():
         tickers = find_all_tickers(text)
         if not tickers:
             continue
-        for ticker, confidence in tickers:
+        for ticker, confidence in _sorted_tickers(tickers):
+            if _cap_reached():
+                break
             h = get_hash(text + ticker)
             if already_seen(h):
                 continue
@@ -476,6 +495,8 @@ def main():
     # ── White House RSS ────────────────────────────────────────────────
     print("\n🏛️  White House RSS …")
     for entry in fetch_whitehouse():
+        if _cap_reached():
+            break
         text = (entry.get("title", "") + " " + entry.get("summary", "")).strip()
         if not text:
             continue
@@ -487,7 +508,9 @@ def main():
         tickers = find_all_tickers(text)
         if not tickers:
             continue
-        for ticker, confidence in tickers:
+        for ticker, confidence in _sorted_tickers(tickers):
+            if _cap_reached():
+                break
             h = get_hash(text + ticker)
             if already_seen(h):
                 continue

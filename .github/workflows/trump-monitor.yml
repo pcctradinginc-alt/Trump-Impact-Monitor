@@ -36,7 +36,6 @@ jobs:
         env:
           ANTHROPIC_API_KEY:       ${{ secrets.ANTHROPIC_API_KEY }}
           SCRAPE_CREATORS_API_KEY: ${{ secrets.SCRAPE_CREATORS_API_KEY }}
-          NEWSAPI_KEY:             ${{ secrets.NEWSAPI_KEY }}
           GMAIL_EMAIL:             ${{ secrets.GMAIL_EMAIL }}
           GMAIL_APP_PASSWORD:      ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL:         ${{ secrets.RECIPIENT_EMAIL }}
