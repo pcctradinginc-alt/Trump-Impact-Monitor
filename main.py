@@ -33,7 +33,7 @@ DB_PATH              = "alerts.db"
 LOOKBACK_HOURS       = 24
 MAX_ALERTS_PER_RUN   = 10   # Schutz vor Kosten-Explosion bei Breaking-News-Wellen
 MAX_TICKERS_PER_ART  = 3    # max. Tickers pro Artikel (hoch vor niedrig)
-MODEL                = "claude-3-5-sonnet-20241022"
+MODEL                = "claude-sonnet-4-6"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECRETS-VALIDIERUNG
