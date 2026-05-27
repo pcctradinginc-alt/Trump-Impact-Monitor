@@ -352,6 +352,40 @@ def format_market_block(ticker: str) -> str:
     )
 
 # ─────────────────────────────────────────────
+# CLAUDE SEKTOR-ERKENNUNG (Truth Social ohne direkten Ticker-Match)
+# ─────────────────────────────────────────────
+def discover_tickers_via_claude(text: str) -> list[tuple[str, str]]:
+    """
+    Fragt Claude: Welche börsennotierten Unternehmen sind durch diesen
+    Trump-Post am wahrscheinlichsten direkt betroffen?
+    Gibt max. 3 (ticker, "claude") Tupel zurück, oder [] wenn keiner.
+    """
+    prompt = (
+        "Trump hat folgenden Text auf Truth Social gepostet:\n\n"
+        f"{text}\n\n"
+        "Welche börsennotierten US-Unternehmen sind dadurch am wahrscheinlichsten "
+        "DIREKT und KONKRET betroffen (Kursreaktion realistisch)? "
+        "Antworte NUR mit einer kommaseparierten Liste von max. 3 Ticker-Symbolen (z.B. NVDA,TSM,INTC). "
+        "Falls kein konkreter Unternehmensbezug erkennbar ist, antworte nur mit: NONE"
+    )
+    try:
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=30,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip().upper()
+        if raw == "NONE" or not raw:
+            return []
+        tickers = [t.strip() for t in raw.split(",") if re.match(r'^[A-Z]{1,5}$', t.strip())]
+        print(f"  🔍 Claude Sektor-Erkennung: {tickers}")
+        return [(t, "claude") for t in tickers[:3]]
+    except Exception as e:
+        print(f"  ⚠️  Sektor-Erkennung Fehler: {e}")
+        return []
+
+# ─────────────────────────────────────────────
 # LLM ANALYSIS + ALERT
 # ─────────────────────────────────────────────
 def analyze_and_alert(source: str, published, raw_text: str, ticker: str, url: str,
@@ -363,6 +397,11 @@ def analyze_and_alert(source: str, published, raw_text: str, ticker: str, url: s
         confidence_block = (
             f"NIEDRIG – {ticker} wurde nur über ein indirektes Stichwort (Produkt/Brand) gefunden, "
             f"nicht über Ticker-Symbol oder Firmenname. Prüfe im Text, ob {ticker} wirklich gemeint ist."
+        )
+    elif confidence == "claude":
+        confidence_block = (
+            f"CLAUDE-INFERENZ – {ticker} wurde nicht explizit im Text genannt, sondern von Claude als "
+            f"wahrscheinlich betroffenes Unternehmen identifiziert. Bitte kritisch prüfen."
         )
     else:
         confidence_block = "HOCH – Ticker-Symbol oder Firmenname direkt im Text gefunden."
@@ -423,11 +462,18 @@ Konfidenz: [hoch / mittel / niedrig – kombiniert aus Erkennungs-Konfidenz ({co
     except sqlite3.IntegrityError:
         pass
 
-    conf_badge = (
-        '<span style="background:#e67e22;color:white;padding:2px 6px;border-radius:4px;font-size:11px;">'
-        '⚠️ Erkennungs-Konfidenz: niedrig</span><br><br>'
-        if confidence == "niedrig" else ""
-    )
+    if confidence == "niedrig":
+        conf_badge = (
+            '<span style="background:#e67e22;color:white;padding:2px 6px;border-radius:4px;font-size:11px;">'
+            '⚠️ Erkennungs-Konfidenz: niedrig</span><br><br>'
+        )
+    elif confidence == "claude":
+        conf_badge = (
+            '<span style="background:#8e44ad;color:white;padding:2px 6px;border-radius:4px;font-size:11px;">'
+            '🤖 Claude-Inferenz: kein direkter Ticker-Match</span><br><br>'
+        )
+    else:
+        conf_badge = ""
     html = f"""
 <html><body style="font-family:monospace;font-size:14px;">
 <h2 style="color:#c0392b;">🚨 Trump-Impact Alert – {ticker}</h2>
@@ -486,6 +532,9 @@ def main():
         if not is_financially_relevant(text):
             continue
         tickers = find_all_tickers(text)
+        if not tickers:
+            # Kein direkter Match → Claude nach betroffenen Unternehmen fragen
+            tickers = discover_tickers_via_claude(text)
         if not tickers:
             continue
         url = post.get("url", post.get("uri", "https://truthsocial.com/@realDonaldTrump"))
