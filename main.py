@@ -994,7 +994,7 @@ def fetch_oge_ptr_links() -> list[dict]:
         if r.ok:
             pdfs = _extract_pdf_links(r.text, OGE_WH_URL)
             for pdf in pdfs:
-                if OGE_TRUMP_PATTERN.search(pdf) or "periodic" in pdf.lower():
+                if OGE_TRUMP_PATTERN.search(pdf):  # nur Trump-PTRs, nicht alle WH-Mitarbeiter
                     found.append({"pdf_url": pdf, "source": "Whitehouse.gov"})
     except Exception as e:
         log.warning("Whitehouse Disclosures: %s", e)
@@ -1801,10 +1801,11 @@ def record_outcomes():
     if not rows:
         return
 
-    log.info(f"\n📊 Backtesting: {len(rows)} Outcomes zu aktualisieren …")
+    log.info("Backtesting: %d Outcomes zu aktualisieren …", len(rows))
     for event_id, ticker, processed_at, price_alert, price_24h, price_7d in rows:
-        data = fetch_market_data.__wrapped__(ticker)  # Cache umgehen für aktuelle Daten
+        data = fetch_market_data(ticker)  # gecachte Version — kein Rate-Limit-Spam
         if not data:
+            time.sleep(1)  # kurze Pause bei leerem Result (Rate-Limit-Schutz)
             continue
         current = data.get("price")
 
