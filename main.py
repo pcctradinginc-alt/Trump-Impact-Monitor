@@ -960,7 +960,7 @@ FINANCIAL_RSS_FEEDS = [
     ("CNBC Markets",        "https://www.cnbc.com/id/10000664/device/rss/rss.html"),
     ("MarketWatch",         "https://feeds.marketwatch.com/marketwatch/topstories/"),
     ("Yahoo Finance",       "https://finance.yahoo.com/rss/topstories"),
-    ("Barrons",             "https://www.barrons.com/xml/rss/3_7510.xml"),
+    ("Seeking Alpha",       "https://seekingalpha.com/market_currents.xml"),
     ("WSJ Markets",         "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"),
     # Trump-spezifische Google News Feeds
     ("Google News Trump",         "https://news.google.com/rss/search?q=trump+tariff+trade&hl=en-US&gl=US&ceid=US:en"),
@@ -1978,32 +1978,64 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
 # ─────────────────────────────────────────────────────────────────────────────
 def record_outcomes():
     """
-    Lädt alle Events ohne vollständige Outcome-Daten und füllt
-    price_24h / price_7d nach, sobald genug Zeit vergangen ist.
-    Ermöglicht spätere Trefferquoten-Analyse per SQL.
+    Lädt Events ohne vollständige Outcome-Daten und füllt price_24h / price_7d nach.
+    Limit 5 pro Run — verhindert yfinance Rate-Limit-Spam.
+    Tickers mit 5+ Fehlschlägen werden für 24h übersprungen (yf_fail_count).
     """
+    # Fehlerzähler-Tabelle sicherstellen
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS yf_failures (
+            ticker      TEXT PRIMARY KEY,
+            fail_count  INTEGER DEFAULT 0,
+            last_fail   TEXT
+        )
+    """)
+    conn.commit()
+
     rows = conn.execute("""
         SELECT e.event_id, e.ticker, e.processed_at,
                o.price_alert, o.price_24h, o.price_7d
         FROM events e
         LEFT JOIN outcomes o ON e.event_id = o.event_id
-        WHERE o.event_id IS NULL
+        LEFT JOIN yf_failures f ON e.ticker = f.ticker
+        WHERE (o.event_id IS NULL
            OR (o.price_24h IS NULL AND e.processed_at < datetime('now', '-25 hours'))
-           OR (o.price_7d  IS NULL AND e.processed_at < datetime('now', '-8 days'))
-        LIMIT 20
+           OR (o.price_7d  IS NULL AND e.processed_at < datetime('now', '-8 days')))
+          AND (f.fail_count IS NULL OR f.fail_count < 5
+               OR f.last_fail < datetime('now', '-24 hours'))
+        LIMIT 5
     """).fetchall()
 
     if not rows:
         return
 
     log.info("Backtesting: %d Outcomes zu aktualisieren …", len(rows))
+    seen_tickers: set[str] = set()
     for event_id, ticker, processed_at, price_alert, price_24h, price_7d in rows:
-        # lru_cache umgehen: direkt yfinance aufrufen mit längerem Backoff
-        fetch_market_data.cache_clear()
-        time.sleep(3)   # yfinance erlaubt ~20 Calls/min — 3s Abstand = sicher
+        if ticker in seen_tickers:
+            continue  # gleichen Ticker nicht zweimal pro Run fetchen
+        seen_tickers.add(ticker)
+        time.sleep(2)
         data = fetch_market_data(ticker)
         if not data:
+            # Fehlschlag zählen
+            conn.execute("""
+                INSERT INTO yf_failures (ticker, fail_count, last_fail) VALUES (?, 1, ?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    fail_count = fail_count + 1,
+                    last_fail  = excluded.last_fail
+            """, (ticker, now_utc().isoformat()))
+            conn.commit()
+            log.warning("  ⚠️  yfinance Fehlschlag #%d für %s",
+                conn.execute("SELECT fail_count FROM yf_failures WHERE ticker=?",
+                             (ticker,)).fetchone()[0], ticker)
             continue
+        # Erfolg: Fehlerzähler zurücksetzen
+        conn.execute("""
+            INSERT INTO yf_failures (ticker, fail_count, last_fail) VALUES (?, 0, ?)
+            ON CONFLICT(ticker) DO UPDATE SET fail_count=0, last_fail=excluded.last_fail
+        """, (ticker, now_utc().isoformat()))
+        conn.commit()
         current = data.get("price")
 
         # Alert-Preis beim ersten Mal setzen
