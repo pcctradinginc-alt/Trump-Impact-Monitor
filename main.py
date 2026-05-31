@@ -550,13 +550,23 @@ def parse_form4(accession: str, document: str) -> dict:
     """
     Parst Form-4-XML und gibt Transaktionsdetails zurück.
     Gibt leeres Dict zurück wenn kein XML verfügbar.
+    Ältere EDGAR-Dokumente sind HTML-wrapped — strip_tags entfernt das.
     """
     url = f"{EDGAR_ARCHIVE}/{accession}/{document}"
     try:
         r = requests.get(url, headers=EDGAR_HEADERS, timeout=15)
         r.raise_for_status()
-        root = ET.fromstring(r.text)
-        ns   = ""  # Form 4 XML hat keinen Namespace
+        text = r.text
+        # Ältere Filings: XML in HTML eingebettet → XML-Block extrahieren
+        if text.strip().startswith("<"):
+            xml_start = text.find("<?xml")
+            if xml_start == -1:
+                xml_start = text.find("<ownershipDocument")
+            if xml_start > 0:
+                text = text[xml_start:]
+        # Ungültige XML-Entities bereinigen
+        text = re.sub(r'&(?!amp;|lt;|gt;|quot;|apos;)([^;]{1,20};?)', r'&amp;\1', text)
+        root = ET.fromstring(text)
 
         def get(path: str) -> str:
             el = root.find(path)
@@ -704,18 +714,38 @@ def send_edgar_alert(filing: dict, details: dict) -> None:
     print(f"  📨 EDGAR Alert gesendet: {form} | {ticker} | {tx_type} | {filed}")
 
 
+EDGAR_LOOKBACK_DAYS = 90  # Nur Filings der letzten 90 Tage alertieren
+
 def check_edgar_alerts() -> None:
     """
     Hauptfunktion für EDGAR-Monitoring.
     Prüft neue Filings, parst Form 4, sendet Alert bei unbekannten Transaktionen.
+    Datum-Filter verhindert Spam mit historischen Filings beim ersten Run.
     """
     print("\n🏦 SEC EDGAR …")
-    filings = fetch_edgar_filings()
-    new_count = 0
+    filings      = fetch_edgar_filings()
+    new_count    = 0
+    cutoff_edgar = (now_utc() - timedelta(days=EDGAR_LOOKBACK_DAYS)).date()
+
     for filing in filings:
         acc = filing["accession"]
         if not acc:
             continue
+
+        # Datum-Filter: nur Filings der letzten 90 Tage alertieren
+        try:
+            filing_date = datetime.strptime(filing["date"], "%Y-%m-%d").date()
+            if filing_date < cutoff_edgar:
+                # Trotzdem in DB speichern damit kein Re-Alert nach Rollover
+                conn.execute(
+                    "INSERT OR IGNORE INTO edgar_filings VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (acc, filing["form"], filing["date"], "", "", "", "", "", "",
+                     "HISTORICAL-NO-ALERT"),
+                )
+                continue
+        except ValueError:
+            pass
+
         exists = conn.execute(
             "SELECT 1 FROM edgar_filings WHERE accession=?", (acc,)
         ).fetchone()
@@ -748,6 +778,7 @@ def check_edgar_alerts() -> None:
         send_edgar_alert(filing, details)
         new_count += 1
 
+    conn.commit()
     if new_count == 0:
         print("  EDGAR: Keine neuen Filings")
 
