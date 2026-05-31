@@ -2,9 +2,9 @@ name: Trump Impact Monitor
 
 on:
   schedule:
-    - cron: '0 */4 * * *'    # alle 4 Stunden (6x/Tag)
-    - cron: '25 13 * * 1-5'  # 09:25 ET (5 min vor NYSE-Öffnung, Mo-Fr)
-    - cron: '55 20 * * 1-5'  # 16:55 ET (5 min vor NYSE-Schluss, Mo-Fr)
+    - cron: '0 * * * *'       # stündlich
+    - cron: '25 13 * * 1-5'   # 09:25 ET (5 min vor NYSE-Öffnung, Mo-Fr)
+    - cron: '55 20 * * 1-5'   # 16:55 ET (5 min vor NYSE-Schluss, Mo-Fr)
   workflow_dispatch:          # manueller Start via GitHub UI
 
 permissions:

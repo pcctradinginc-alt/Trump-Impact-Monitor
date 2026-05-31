@@ -155,20 +155,72 @@ def mentions_trump(text: str) -> bool:
 # FINANZ-KEYWORDS  –  Pre-Filter vor teurem LLM-Aufruf
 # ─────────────────────────────────────────────────────────────────────────────
 FINANCIAL_KEYWORDS = {
+    # Märkte & Instrumente
     "tariff", "tariffs", "sanction", "sanctions", "trade deal", "trade war",
-    "invest", "investment", "stock", "shares", "market", "deal", "contract",
-    "merger", "acquisition", "ban", "subsidy", "tax", "fine", "penalty",
-    "regulation", "import", "export", "manufacturer", "factory", "production",
-    "revenue", "profit", "earnings", "ipo", "billions", "millions", "trillion",
-    "economy", "economic", "federal reserve", "interest rate", "inflation",
-    "oil", "energy", "chip", "semiconductor", "defense", "military contract",
-    "crypto", "bitcoin", "deregulation", "privatize", "nationalize",
-    "price", "cost", "supply chain", "jobs", "layoff", "hire",
+    "invest", "investment", "stock", "stocks", "shares", "share price", "market",
+    "deal", "contract", "merger", "acquisition", "ipo", "spin-off", "buyout",
+    "ban", "subsidy", "subsidies", "tax", "fine", "penalty", "lawsuit", "settlement",
+    "regulation", "deregulation", "import", "export", "duty", "duties", "quota",
+    "manufacturer", "factory", "production", "supply chain", "supply chains",
+    "revenue", "profit", "earnings", "dividend", "valuation", "market cap",
+    "billions", "millions", "trillion", "billion dollar", "million dollar",
+    "economy", "economic", "gdp", "recession", "federal reserve", "fed rate",
+    "interest rate", "inflation", "deflation", "currency", "dollar", "yuan",
+    "oil", "crude", "gas", "lng", "energy", "nuclear", "solar", "wind power",
+    "chip", "chips", "semiconductor", "wafer", "fab", "foundry",
+    "defense", "military contract", "pentagon", "nato", "weapons",
+    "crypto", "bitcoin", "ethereum", "blockchain", "token", "coin",
+    "privatize", "nationalize", "stimulus", "bailout", "debt ceiling",
+    "price", "cost", "costs", "jobs", "layoff", "layoffs", "hire", "hiring",
+    "company", "corporation", "enterprise", "business", "firm", "brand",
+    "ceo", "founder", "chairman", "executive",
+    # ── Trump-spezifische direkte Kauf-/Verkaufsempfehlungen ──────────────
+    "buy", "buying", "sell", "selling", "selling off", "purchase", "invest in",
+    "short", "short sell", "put option", "call option",
+    # ── Trump-typische Superlative & Endorsements ──────────────────────────
+    "great", "greatest", "great company", "great deal", "great job",
+    "best", "best company", "best in the world", "best ever",
+    "fantastic", "fantastically", "incredible", "incredibly",
+    "amazing", "amazingly", "tremendous", "tremendously",
+    "beautiful", "perfect", "genius", "brilliant", "outstanding",
+    "terrific", "wonderful", "spectacular", "extraordinary",
+    "winning", "winner", "winners", "huge win", "big win",
+    "love", "love it", "love them", "love what they",
+    "congratulations", "congrats", "well done", "proud of",
+    # ── Trump-typische Negativaussagen & Boykott-Signale ──────────────────
+    "terrible", "horrible", "disaster", "catastrophe", "failing", "failed",
+    "loser", "losers", "overrated", "disgrace", "corrupt", "incompetent",
+    "boycott", "never buy", "stay away", "avoid", "bad company", "weak",
+    "rip off", "ripoff", "scam", "fraud", "unfair", "wrong", "fake",
+    "angry", "furious", "not happy", "very unhappy", "disappointed",
+    # ── Branchen-Kontext ───────────────────────────────────────────────────
+    "pharmaceutical", "pharma", "drug", "vaccine", "biotech",
+    "artificial intelligence", "ai company", "tech company",
+    "steel", "aluminum", "aluminium", "copper", "lithium", "rare earth",
+    "agriculture", "farm", "farmer", "wheat", "corn", "soy", "soybean",
+    "shipping", "freight", "logistics", "port", "cargo",
+    "real estate", "housing", "construction", "infrastructure",
+    "bank", "banking", "finance", "insurance", "wall street",
 }
 
-def is_financially_relevant(text: str) -> bool:
+# Zusätzlicher Sentiment-Filter NUR für Truth Social (Original-Posts Trump)
+# Greift wenn FINANCIAL_KEYWORDS nicht matcht — fängt direkte Nennungen auf
+TRUMP_DIRECT_SIGNALS = {
+    "dell", "nvidia", "apple", "microsoft", "amazon", "google", "tesla",
+    "meta", "palantir", "boeing", "lockheed", "raytheon", "spacex",
+    "elon", "musk", "tim cook", "jensen huang", "andy jassy",
+    "wall street", "nasdaq", "dow jones", "s&p", "nasdaq",
+    "tariff", "trade", "china", "mexico", "canada", "europe", "eu",
+}
+
+def is_financially_relevant(text: str, truth_social: bool = False) -> bool:
     t = text.lower()
-    return any(kw in t for kw in FINANCIAL_KEYWORDS)
+    if any(kw in t for kw in FINANCIAL_KEYWORDS):
+        return True
+    # Bei Truth-Social-Posts: auch direkte Firmen-/Personen-Nennungen
+    if truth_social and any(kw in t for kw in TRUMP_DIRECT_SIGNALS):
+        return True
+    return False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TEXT-REINIGUNG  –  HTML / URLs entfernen vor Entity-Matching
@@ -826,6 +878,301 @@ def fetch_whitehouse() -> list:
         print(f"  ⚠️  White House RSS Fehler: {e}")
         return []
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OGE 278-T MONITOR  –  Periodic Transaction Reports (kostenlos, kein Key)
+# ─────────────────────────────────────────────────────────────────────────────
+# Strategie: Drei Quellen parallel, erste erfolgreiche gewinnt.
+# 1. OGE public portal (Lotus Notes, HTML-Parsing)
+# 2. Whitehouse.gov Disclosures Seite (direkte PDF-Links)
+# 3. Fallback: Google News RSS nach neuen PTR-Berichten
+OGE_PORTAL_URL    = (
+    "https://extapps2.oge.gov/201/Presiden.nsf/PAS+Index/"
+    "Periodic+Transaction+Reports?OpenDocument"
+)
+OGE_WH_URL        = "https://www.whitehouse.gov/disclosures/"
+OGE_HEADERS       = {"User-Agent": "Mozilla/5.0 (compatible; TrumpMonitor/1.0)"}
+OGE_TRUMP_PATTERN = re.compile(r"trump", re.IGNORECASE)
+
+
+def _extract_pdf_links(html_text: str, base_url: str) -> list[str]:
+    """Extrahiert alle absoluten PDF-URLs aus einem HTML-Dokument."""
+    raw = re.findall(r'href=["\']([^"\']+\.pdf)["\']', html_text, re.IGNORECASE)
+    links = []
+    base = "/".join(base_url.split("/")[:3])
+    for link in raw:
+        if link.startswith("http"):
+            links.append(link)
+        elif link.startswith("/"):
+            links.append(base + link)
+        else:
+            links.append(base + "/" + link)
+    return links
+
+
+def fetch_oge_ptr_links() -> list[dict]:
+    """
+    Sucht auf OGE-Portal und Whitehouse.gov nach neuen Trump PTR-PDFs.
+    Gibt [{pdf_url, source}] zurück.
+    """
+    found: list[dict] = []
+
+    # — Quelle 1: OGE Public Portal ——————————————————————————————————————————
+    try:
+        r = requests.get(OGE_PORTAL_URL, headers=OGE_HEADERS, timeout=20)
+        if r.ok:
+            pdfs = _extract_pdf_links(r.text, OGE_PORTAL_URL)
+            for pdf in pdfs:
+                if OGE_TRUMP_PATTERN.search(pdf) or OGE_TRUMP_PATTERN.search(r.text[:5000]):
+                    found.append({"pdf_url": pdf, "source": "OGE Portal"})
+    except Exception as e:
+        print(f"  ⚠️  OGE Portal: {e}")
+
+    # — Quelle 2: Whitehouse.gov Disclosures —————————————————————————————————
+    try:
+        r = requests.get(OGE_WH_URL, headers=OGE_HEADERS, timeout=20)
+        if r.ok:
+            pdfs = _extract_pdf_links(r.text, OGE_WH_URL)
+            for pdf in pdfs:
+                if OGE_TRUMP_PATTERN.search(pdf) or "periodic" in pdf.lower():
+                    found.append({"pdf_url": pdf, "source": "Whitehouse.gov"})
+    except Exception as e:
+        print(f"  ⚠️  Whitehouse Disclosures: {e}")
+
+    # — Quelle 3: Google News RSS Fallback ———————————————————————————————————
+    if not found:
+        try:
+            rss_url = (
+                "https://news.google.com/rss/search"
+                "?q=Trump+%22Periodic+Transaction+Report%22+OGE"
+                "&hl=en-US&gl=US&ceid=US:en"
+            )
+            feed = feedparser.parse(rss_url)
+            for entry in feed.entries[:5]:
+                title = entry.get("title", "")
+                link  = entry.get("link", "")
+                if "periodic transaction" in title.lower() or "278" in title:
+                    found.append({"pdf_url": link, "source": "Google News / OGE"})
+        except Exception as e:
+            print(f"  ⚠️  OGE Google News Fallback: {e}")
+
+    # Deduplizieren
+    seen_urls: set[str] = set()
+    unique = []
+    for item in found:
+        if item["pdf_url"] not in seen_urls:
+            seen_urls.add(item["pdf_url"])
+            unique.append(item)
+    return unique
+
+
+def parse_oge_ptr_pdf(pdf_url: str) -> list[dict]:
+    """
+    Lädt ein OGE 278-T PDF und extrahiert Transaktionszeilen mit pdfplumber.
+    Gibt [{asset, tx_type, date, amount, row_text}] zurück.
+    Fällt auf Text-Extraktion zurück wenn keine Tabelle gefunden.
+    """
+    try:
+        import pdfplumber, io
+    except ImportError:
+        print("  ⚠️  pdfplumber nicht installiert — PDF-Parsing übersprungen")
+        return []
+    try:
+        r = requests.get(pdf_url, headers=OGE_HEADERS, timeout=30)
+        r.raise_for_status()
+        transactions = []
+        with pdfplumber.open(io.BytesIO(r.content)) as pdf:
+            for page in pdf.pages:
+                # Tabellenbasiert
+                for table in (page.extract_tables() or []):
+                    for row in table:
+                        if not row:
+                            continue
+                        cells = [str(c).strip() for c in row if c]
+                        row_text = " | ".join(cells)
+                        # Transaktionszeilen erkennen: P/S/E oder ausgeschrieben
+                        if any(kw in row_text for kw in
+                               ["Purchase", "Sale", "Exchange", " P ", " S ", " E "]):
+                            # Asset-Name meist in erster Zelle
+                            asset = cells[0] if cells else ""
+                            tx_type = "?"
+                            for c in cells:
+                                if c in ("P", "Purchase"): tx_type = "KAUF"
+                                elif c in ("S", "Sale"):    tx_type = "VERKAUF"
+                                elif c in ("E", "Exchange"):tx_type = "TAUSCH"
+                            transactions.append({
+                                "asset":    asset,
+                                "tx_type":  tx_type,
+                                "row_text": row_text,
+                            })
+                # Fallback: Volltext durchsuchen wenn keine Tabelle
+                if not transactions:
+                    text = page.extract_text() or ""
+                    for line in text.splitlines():
+                        if any(kw in line for kw in
+                               ["Purchase", "Sale", "Exchange", "P –", "S –"]):
+                            transactions.append({
+                                "asset":    line[:80],
+                                "tx_type":  "?",
+                                "row_text": line,
+                            })
+        return transactions
+    except Exception as e:
+        print(f"  ⚠️  OGE PDF Parse Fehler ({pdf_url}): {e}")
+        return []
+
+
+def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
+    """Sendet E-Mail-Alert für neuen OGE 278-T Periodic Transaction Report."""
+    tx_rows = ""
+    for tx in transactions[:20]:  # max 20 Zeilen
+        color = "#d1fae5" if tx["tx_type"] == "KAUF" else \
+                "#fee2e2" if tx["tx_type"] == "VERKAUF" else "#f5f5f7"
+        emoji = "📈" if tx["tx_type"] == "KAUF" else \
+                "📉" if tx["tx_type"] == "VERKAUF" else "🔄"
+        tx_rows += (
+            f'<tr style="background:{color};">'
+            f'<td style="padding:8px 12px;font-size:13px;color:#1d1d1f;">'
+            f'{emoji} {tx["asset"]}</td>'
+            f'<td style="padding:8px 12px;font-size:13px;font-weight:600;color:#1d1d1f;">'
+            f'{tx["tx_type"]}</td>'
+            f'<td style="padding:8px 12px;font-size:11px;color:#6e6e73;">'
+            f'{tx["row_text"][:120]}</td>'
+            f'</tr>'
+        )
+
+    if not tx_rows:
+        tx_rows = (
+            '<tr><td colspan="3" style="padding:12px;font-size:13px;color:#6e6e73;">'
+            'Keine Transaktionszeilen automatisch erkannt — bitte PDF manuell prüfen.'
+            '</td></tr>'
+        )
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="de">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f7;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f7;padding:32px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+
+  <tr><td style="background:#1d1d1f;border-radius:16px 16px 0 0;padding:28px 32px;">
+    <p style="margin:0 0 4px 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      OGE Form 278-T · Periodic Transaction Report
+    </p>
+    <h1 style="margin:0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:24px;font-weight:700;color:#f5f5f7;letter-spacing:-0.02em;">
+      🏛️ Neuer Trump-Transaktionsbericht
+    </h1>
+    <p style="margin:8px 0 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:13px;color:#6e6e73;">
+      Quelle: {source} · Entdeckt: {now_utc().strftime('%Y-%m-%d %H:%M UTC')}
+    </p>
+  </td></tr>
+
+  <tr><td style="background:#ffffff;padding:24px 32px 8px;">
+    <p style="margin:0 0 10px;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Erkannte Transaktionen ({len(transactions)})
+    </p>
+    <table style="border-collapse:collapse;width:100%;border-radius:10px;overflow:hidden;">
+      <thead>
+        <tr style="background:#f5f5f7;">
+          <th style="padding:8px 12px;font-size:11px;color:#6e6e73;text-align:left;">Asset</th>
+          <th style="padding:8px 12px;font-size:11px;color:#6e6e73;text-align:left;">Typ</th>
+          <th style="padding:8px 12px;font-size:11px;color:#6e6e73;text-align:left;">Details</th>
+        </tr>
+      </thead>
+      <tbody>{tx_rows}</tbody>
+    </table>
+    <p style="margin:16px 0 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:13px;">
+      <a href="{pdf_url}" style="color:#0071e3;text-decoration:none;">
+        📄 Original-PDF öffnen ↗
+      </a>
+    </p>
+  </td></tr>
+
+  <tr><td style="background:#ffffff;padding:0 32px;">
+    <div style="border-top:1px solid #e5e5ea;margin-top:16px;"></div>
+  </td></tr>
+
+  <tr><td style="background:#ffffff;padding:20px 32px 24px;">
+    <p style="margin:0 0 12px;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Trumps bekannte Positionen
+    </p>
+    {holdings_html_block()}
+  </td></tr>
+
+  <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:16px 32px;
+       border-top:1px solid #e5e5ea;">
+    <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:11px;color:#6e6e73;">
+      OGE Form 278-T · Automatisch erkannt via {source} ·
+      {now_utc().strftime('%Y-%m-%d %H:%M UTC')}
+    </p>
+  </td></tr>
+
+</table></td></tr></table>
+</body></html>"""
+
+    subject = f"🏛️ OGE 278-T: Neuer Trump-Transaktionsbericht ({len(transactions)} Positionen)"
+    send_gmail(subject, html_body)
+    print(f"  📨 OGE Alert gesendet: {len(transactions)} Transaktionen | {source}")
+
+
+def check_oge_alerts() -> None:
+    """
+    Prüft täglich (via Datum-Check) auf neue OGE 278-T PDFs.
+    Sendet Alert nur bei wirklich neuen, noch nicht gesehenen PDFs.
+    """
+    print("\n🏛️  OGE 278-T …")
+
+    # OGE-Tabelle anlegen falls noch nicht vorhanden
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS oge_ptrs (
+            pdf_url     TEXT PRIMARY KEY,
+            source      TEXT,
+            tx_count    INTEGER,
+            detected_at TEXT
+        )
+    """)
+    conn.commit()
+
+    links = fetch_oge_ptr_links()
+    if not links:
+        print("  OGE: Keine PTR-Links gefunden")
+        return
+
+    new_count = 0
+    for item in links:
+        pdf_url = item["pdf_url"]
+        source  = item["source"]
+
+        exists = conn.execute(
+            "SELECT 1 FROM oge_ptrs WHERE pdf_url=?", (pdf_url,)
+        ).fetchone()
+        if exists:
+            continue
+
+        # Neu — PDF herunterladen und parsen
+        print(f"  📥 Neues OGE PDF: {pdf_url[:80]}…")
+        transactions = parse_oge_ptr_pdf(pdf_url)
+
+        conn.execute(
+            "INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
+            (pdf_url, source, len(transactions), now_utc().isoformat()),
+        )
+        conn.commit()
+
+        send_oge_alert(pdf_url, source, transactions)
+        new_count += 1
+
+    if new_count == 0:
+        print("  OGE: Keine neuen PTR-Berichte")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TRUMP HOLDINGS  (OGE Form 278 – öffentlich)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1383,7 +1730,7 @@ def main():
         ts = post.get("created_at", post.get("published"))
         if not is_recent(ts):
             continue
-        if not is_financially_relevant(text):
+        if not is_financially_relevant(text, truth_social=True):
             continue
         tickers = find_all_tickers(text)
         if not tickers:
@@ -1512,6 +1859,7 @@ def main():
             processed += 1
 
     check_edgar_alerts()
+    check_oge_alerts()
     record_outcomes()
 
     print(f"\n{'═'*62}")
