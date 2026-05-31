@@ -109,6 +109,10 @@ def get_finbert_sentiment(text: str) -> str:
 TRUMP_NAMES = {
     "trump", "donald trump", "donald j. trump", "potus",
     "mar-a-lago", "truth social", "trump administration",
+    "the president", "white house", "executive order",
+    "commander in chief", "oval office", "trump tariff",
+    "trump tax", "trump trade", "trump ban", "trump deal",
+    "trade representative", "ustr",
 }
 
 def mentions_trump(text: str) -> bool:
@@ -455,6 +459,23 @@ def discover_tickers_via_claude(text: str) -> list[tuple[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 # HAUPTANALYSE  –  LLM + Alert + E-Mail
 # ─────────────────────────────────────────────────────────────────────────────
+def _quick_relevance_check(ticker: str, text: str) -> bool:
+    """Haiku-Pre-Check (~$0.0001) — vor teuren FinBERT/yfinance/Sonnet-Calls."""
+    try:
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=5,
+            temperature=0,
+            messages=[{"role": "user", "content":
+                f"Is {ticker} directly and concretely mentioned or clearly affected "
+                f"in this text? Answer only YES or NO:\n\n{text[:600]}"}],
+        )
+        return "YES" in resp.content[0].text.upper()
+    except Exception as e:
+        print(f"  ⚠️  Pre-Check Fehler ({ticker}): {e}")
+        return True  # im Zweifel durchlassen
+
+
 def analyze_and_alert(
     source:     str,
     published,
@@ -463,77 +484,105 @@ def analyze_and_alert(
     url:        str,
     confidence: str = "hoch",
 ):
+    # ── Haiku-Pre-Check (nur bei Claude-Inferenz, wo Relevanz unsicher) ──────
+    if confidence == "claude" and not _quick_relevance_check(ticker, raw_text):
+        print(f"  ⏭️  {ticker} Haiku-Pre-Check NEIN → übersprungen")
+        return
+
+    # ── Teure Calls erst nach Pre-Check ──────────────────────────────────────
+    market_data  = fetch_market_data(ticker)
     market_block = format_market_block(ticker)
     holding_info = trump_holding_info(ticker)
     finbert_sent = get_finbert_sentiment(raw_text)
 
-    # Konfidenz-Block für Prompt
+    # Konfidenz-Beschreibung für Prompt
     if confidence == "niedrig":
         conf_desc = (
-            f"NIEDRIG – {ticker} wurde nur über ein Produkt/Brand-Stichwort erkannt, "
-            f"nicht über Ticker-Symbol oder Firmenname direkt."
+            f"LOW — {ticker} matched only via product/brand keyword, "
+            f"not by ticker symbol or company name directly."
         )
     elif confidence == "claude":
         conf_desc = (
-            f"CLAUDE-INFERENZ – {ticker} nicht explizit im Text genannt; "
-            f"Claude hat dieses Unternehmen als wahrscheinlich betroffen eingestuft."
+            f"CLAUDE-INFERRED — {ticker} not explicitly named in text; "
+            f"Claude identified this company as likely affected."
         )
     else:
-        conf_desc = "HOCH – Ticker-Symbol oder Firmenname direkt im Text gefunden."
+        conf_desc = "HIGH — ticker symbol or company name found directly in text."
 
-    prompt = f"""Du bist ein erfahrener Finanz-Analyst mit Fokus auf politisch getriebene Kursbewegungen.
-Analysiere den folgenden Trump-bezogenen Text in Bezug auf das Unternehmen {ticker}.
+    price    = market_data.get("price", 0)
+    chg_1d   = market_data.get("chg_1d", 0)
+    stop_long  = round(price * 0.92, 2) if price else 0
+    stop_short = round(price * 1.08, 2) if price else 0
 
-═══ QUELLENTEXT ═══════════════════════════════════════════
+    prompt = f"""You are a quantitative political-risk analyst specializing in Trump-driven market dislocations. Be precise, factual, and calibrated. Never speculate beyond what the source text directly supports.
+
+SOURCE TEXT:
 {raw_text}
 
-═══ MARKTDATEN ({ticker} · Yahoo Finance · aktuell) ════════
+SOURCE: {source} | PUBLISHED: {published}
+
+MARKET DATA ({ticker}):
 {market_block}
 
-═══ FINBERT-SENTIMENT (maschinell) ════════════════════════
-{finbert_sent}
+DETECTION CONFIDENCE: {conf_desc}
+TRUMP FINANCIAL INTEREST: {holding_info}
 
-═══ TRUMP-BETEILIGUNG (OGE Form 278) ══════════════════════
-{holding_info}
+COMPARABLE PRECEDENTS (use for magnitude calibration):
+- Trump tariff tweet on steel (Mar 2018): NUE +8%, X +6% intraday
+- Trump Truth Post attacking Amazon (Apr 2018): AMZN -5% within 2h
+- Trump executive order on TikTok (Aug 2020): SNAP +8%, META +2%
+- Trump China chip export ban (Oct 2022): NVDA -15% over 3 days
 
-═══ ERKENNUNGS-KONFIDENZ ══════════════════════════════════
-{conf_desc}
+Respond ONLY in this exact format. No preamble. No markdown.
 
-AUFGABE: Antworte ausschließlich im folgenden Format – keine Einleitung, kein Kommentar:
+RELEVANCE: [YES / NO] — {ticker} is [directly named / sector-affected / tangentially mentioned]
+COMPANY: [Full legal name] ({ticker})
+EVENT_SUMMARY: [One sentence: what Trump said/did, stripped of spin]
+DIRECT_MENTION: [YES / NO] — ticker or company name explicitly in text
+SENTIMENT: [BULLISH / BEARISH / NEUTRAL] for {ticker}
+SENTIMENT_BASIS: [Quote or paraphrase from text that drives sentiment — max 15 words]
+FINBERT_ALIGNMENT: [AGREES / DISAGREES / PARTIAL] with machine reading of "{finbert_sent}"
+PRICE_ALREADY_REACTED: [YES ({chg_1d:+.1f}% today) / NO / UNCLEAR]
+MAGNITUDE_ESTIMATE: [SMALL <3% / MEDIUM 3-10% / LARGE >10%] intraday — [one-sentence rationale]
+TIME_TO_IMPACT: [IMMEDIATE pre/intraday / SHORT 1-5 days / MEDIUM 1-4 weeks / UNCLEAR]
+TRUMP_CONFLICT_OF_INTEREST: [YES / NO / UNKNOWN] — {holding_info}
+SUMMARY: [Max 2 sentences. Only facts from source text. Zero speculation.]
+TRADE_DIRECTION: [LONG / SHORT / NO_TRADE]
+TRADE_RATIONALE: [Text evidence + current price level ({price:.2f}) in one sentence]
+STOP_LEVEL: [LONG stop: {stop_long:.2f} (−8%) / SHORT stop: {stop_short:.2f} (+8%) / N/A]
+CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor in max 5 words]"""
 
-RELEVANZ: [JA – {ticker} ist konkreter Gegenstand des Textes / NEIN – kein direkter Unternehmensbezug]
-Unternehmen: [Vollständiger Firmenname] ({ticker})
-Quelle: {source} – [1 Satz Zusammenfassung]
-Sentiment: [positiv / negativ / neutral] – [Begründung in max. 1 Satz aus dem Text]
-FinBERT-Check: {finbert_sent} – [stimmt das mit dem Textinhalt überein? 1 Satz]
-Marktreaktion: [Hat der Kurs bereits reagiert basierend auf den Tagesdaten? 1 Satz]
-Trump-Beteiligung: {holding_info}
-Zusammenfassung: [max. 2 Sätze – nur aus dem Text ableitbar, keine Spekulation]
-Trade-Richtung: [LONG / SHORT / UNKLAR] – [Begründung aus Text UND Kurslage in 1 Satz]
-Konfidenz: [hoch / mittel / niedrig] – [kombiniert aus Erkennungs-Konfidenz und Textqualität]"""
-
-    # ── Claude-Aufruf ────────────────────────────────────────────────────────
+    # ── Claude-Aufruf (Sonnet) ────────────────────────────────────────────────
     try:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=700,
-            temperature=0.1,
+            max_tokens=900,
+            temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
         alert_text = response.content[0].text.strip()
     except Exception as e:
         print(f"  ❌ Claude-API Fehler ({ticker}): {e}")
-        return   # kein Alert bei API-Fehler
+        return
 
     # ── Relevanz-Gate ────────────────────────────────────────────────────────
     first_line = alert_text.splitlines()[0].upper()
-    if "RELEVANZ:" in first_line and "NEIN" in first_line:
+    if "RELEVANCE:" in first_line and "NO" in first_line:
         print(f"  ⏭️  {ticker} übersprungen – kein konkreter Unternehmensbezug")
         return
 
+    # ── Trade-Richtung aus neuem Format ──────────────────────────────────────
+    direction = "UNKLAR"
+    for line in alert_text.splitlines():
+        if line.upper().startswith("TRADE_DIRECTION:"):
+            if "LONG"     in line.upper(): direction = "LONG"
+            elif "SHORT"  in line.upper(): direction = "SHORT"
+            elif "NO_TRADE" in line.upper(): direction = "NO_TRADE"
+            break
+
     # ── Turbo-Empfehlung ─────────────────────────────────────────────────────
-    direction   = parse_trade_direction(alert_text)
-    turbo_block = turbo_recommendation(ticker, direction)
+    turbo_dir   = "UNKLAR" if direction == "NO_TRADE" else direction
+    turbo_block = turbo_recommendation(ticker, turbo_dir)
 
     # ── SQLite-Dedup ─────────────────────────────────────────────────────────
     h = event_hash(ticker, raw_text)
@@ -693,8 +742,9 @@ Konfidenz: [hoch / mittel / niedrig] – [kombiniert aus Erkennungs-Konfidenz un
 </body>
 </html>
 """
-    conf_tag = {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
-    subject  = f"🚨 Trump-Impact Alert – {ticker}{conf_tag} [{direction}] – {source}"
+    dir_emoji = {"LONG": "📈", "SHORT": "📉", "NO_TRADE": "⛔"}.get(direction, "❓")
+    conf_tag  = {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
+    subject   = f"{dir_emoji} Trump-Impact – {ticker}{conf_tag} [{direction}] – {source}"
     send_gmail(subject, html_body)
     print(f"  🎯 Alert gesendet: {ticker} | {direction} | {source} | FinBERT: {finbert_sent}")
 

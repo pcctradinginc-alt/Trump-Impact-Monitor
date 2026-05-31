@@ -2413,5 +2413,111 @@
     "symbol": ["ALK"],
     "company": ["Alaska Airlines", "Ben Minicucci"],
     "weak": []
+  },
+
+  "ENPH": {
+    "symbol": ["ENPH"],
+    "company": ["Enphase Energy", "Enphase"],
+    "weak": ["solar inverter", "rooftop solar", "residential solar"]
+  },
+  "SEDG": {
+    "symbol": ["SEDG"],
+    "company": ["SolarEdge", "SolarEdge Technologies"],
+    "weak": ["solar power optimizer"]
+  },
+  "FSLR": {
+    "symbol": ["FSLR"],
+    "company": ["First Solar", "First Solar Inc"],
+    "weak": ["thin-film solar", "US solar manufacturer", "cadmium telluride"]
+  },
+  "SUNRUN": {
+    "symbol": ["RUN"],
+    "company": ["Sunrun", "Sunrun Inc"],
+    "weak": ["residential solar lease"]
+  },
+
+  "CCJ": {
+    "symbol": ["CCJ"],
+    "company": ["Cameco", "Cameco Corporation"],
+    "weak": ["uranium miner", "nuclear fuel", "uranium enrichment"]
+  },
+  "UEC": {
+    "symbol": ["UEC"],
+    "company": ["Uranium Energy", "Uranium Energy Corp"],
+    "weak": ["uranium producer", "uranium mine"]
+  },
+  "LEU": {
+    "symbol": ["LEU"],
+    "company": ["Centrus Energy", "American Centrifuge"],
+    "weak": ["uranium enrichment", "nuclear fuel supply"]
+  },
+  "CEG": {
+    "symbol": ["CEG"],
+    "company": ["Constellation Energy"],
+    "weak": ["nuclear power plant", "nuclear energy", "Constellation nuclear"]
+  },
+
+  "NEM": {
+    "symbol": ["NEM"],
+    "company": ["Newmont", "Newmont Corporation", "Newmont Mining"],
+    "weak": ["gold miner", "gold mining company"]
+  },
+  "GOLD": {
+    "symbol": ["GOLD"],
+    "company": ["Barrick Gold", "Barrick"],
+    "weak": ["gold producer", "gold mine"]
+  },
+  "AEM": {
+    "symbol": ["AEM"],
+    "company": ["Agnico Eagle", "Agnico Eagle Mines"],
+    "weak": []
+  },
+  "GLD": {
+    "symbol": ["GLD"],
+    "company": ["SPDR Gold Trust", "SPDR Gold Shares"],
+    "weak": ["gold etf", "gold price surge", "gold rally"]
+  },
+  "SLV": {
+    "symbol": ["SLV"],
+    "company": ["iShares Silver Trust"],
+    "weak": ["silver etf", "silver price"]
+  },
+  "USO": {
+    "symbol": ["USO"],
+    "company": ["United States Oil Fund"],
+    "weak": ["oil etf", "crude oil fund", "WTI crude"]
+  },
+
+  "TLT": {
+    "symbol": ["TLT"],
+    "company": ["iShares 20+ Year Treasury Bond ETF"],
+    "weak": ["long bonds", "treasury bonds", "10-year yield", "30-year bond", "bond market selloff"]
+  },
+  "TBT": {
+    "symbol": ["TBT"],
+    "company": ["ProShares UltraShort 20+ Year Treasury"],
+    "weak": ["short bonds", "inverse treasury"]
+  },
+
+  "KWEB": {
+    "symbol": ["KWEB"],
+    "company": ["KraneShares CSI China Internet ETF"],
+    "weak": ["china internet etf", "chinese tech stocks", "China tech ban"]
+  },
+  "FXI": {
+    "symbol": ["FXI"],
+    "company": ["iShares China Large-Cap ETF"],
+    "weak": ["china etf", "chinese large cap", "A-shares"]
+  },
+
+  "KTOS": {
+    "symbol": ["KTOS"],
+    "company": ["Kratos Defense", "Kratos Defense & Security"],
+    "weak": ["drone defense", "unmanned aerial", "hypersonic"]
+  },
+  "RCAT": {
+    "symbol": ["RCAT"],
+    "company": ["Red Cat Holdings"],
+    "weak": ["military drone", "defense drone"]
   }
 }
