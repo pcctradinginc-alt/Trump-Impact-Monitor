@@ -76,8 +76,8 @@ thresholds:
   # Max. Alerts pro Tag (verhindert Kosten-Explosion bei Breaking-News-Wellen)
   max_alerts_per_run: 10
 
-  # Stunden Lookback (bei stündlichem Run: 2-3 empfohlen)
-  lookback_hours: 2
+  # Stunden Lookback (bei stündlichem Run: 3 empfohlen — Puffer für CI-Delay)
+  lookback_hours: 3
 
 sources:
   # Truth Social via CNN-Archiv (primär) + ScapeCreators (Fallback)

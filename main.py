@@ -300,18 +300,26 @@ def send_gmail(subject: str, html_body: str) -> bool:
     msg["From"]    = GMAIL_EMAIL
     msg["To"]      = RECIPIENT
     msg.attach(MIMEText(html_body, "html"))
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(GMAIL_EMAIL, GMAIL_PASS)
-            server.sendmail(GMAIL_EMAIL, RECIPIENT, msg.as_string())
-        log.info(f"  ✅ E-Mail gesendet: {subject}")
-        return True
-    except smtplib.SMTPAuthenticationError:
-        log.error("  ❌ Gmail: Authentifizierung fehlgeschlagen – App-Passwort prüfen")
-    except smtplib.SMTPException as e:
-        log.error(f"  ❌ Gmail SMTP-Fehler: {e}")
-    except Exception as e:
-        log.error(f"  ❌ Gmail unbekannter Fehler: {e}")
+
+    for attempt in range(1, 4):
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(GMAIL_EMAIL, GMAIL_PASS)
+                server.sendmail(GMAIL_EMAIL, RECIPIENT, msg.as_string())
+            log.info("E-Mail gesendet: %s", subject)
+            return True
+        except smtplib.SMTPAuthenticationError:
+            log.error("Gmail: Authentifizierung fehlgeschlagen – App-Passwort prüfen")
+            return False  # Auth-Fehler: Retry sinnlos
+        except smtplib.SMTPException as e:
+            log.warning("Gmail SMTP-Fehler (Versuch %d/3): %s", attempt, e)
+        except Exception as e:
+            log.warning("Gmail unbekannter Fehler (Versuch %d/3): %s", attempt, e)
+
+        if attempt < 3:
+            time.sleep(5 * attempt)  # 5s, dann 10s
+
+    log.error("E-Mail konnte nach 3 Versuchen nicht gesendet werden: %s", subject)
     return False
 
 # ─────────────────────────────────────────────────────────────────────────────
