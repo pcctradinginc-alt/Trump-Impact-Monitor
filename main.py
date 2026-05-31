@@ -35,7 +35,7 @@ RECIPIENT         = os.getenv("RECIPIENT_EMAIL")
 
 TRUMP_TRUTH_ID       = "107780257626128497"
 DB_PATH              = "alerts.db"
-LOOKBACK_HOURS       = 24
+LOOKBACK_HOURS       = 2     # stündlicher Run → 2h Overlap reicht
 MAX_ALERTS_PER_RUN   = 10   # Schutz vor Kosten-Explosion bei Breaking-News-Wellen
 MAX_TICKERS_PER_ART  = 3    # max. Tickers pro Artikel (hoch vor niedrig)
 MODEL                = "claude-sonnet-4-6"
@@ -1316,21 +1316,51 @@ def discover_tickers_via_claude(text: str) -> list[tuple[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 # HAUPTANALYSE  –  LLM + Alert + E-Mail
 # ─────────────────────────────────────────────────────────────────────────────
-def _quick_relevance_check(ticker: str, text: str) -> bool:
-    """Haiku-Pre-Check (~$0.0001) — vor teuren FinBERT/yfinance/Sonnet-Calls."""
+# Statischer Prompt-Block — wird gecacht (Anthropic Prompt Caching)
+_ANALYSIS_SYSTEM = """You are a quantitative political-risk analyst specializing in Trump-driven market dislocations. Be precise, factual, and calibrated. Never speculate beyond what the source text directly supports.
+
+COMPARABLE PRECEDENTS (use for magnitude calibration):
+- Trump tariff tweet on steel (Mar 2018): NUE +8%, X +6% intraday
+- Trump Truth Post attacking Amazon (Apr 2018): AMZN -5% within 2h
+- Trump executive order on TikTok (Aug 2020): SNAP +8%, META +2%
+- Trump China chip export ban (Oct 2022): NVDA -15% over 3 days
+
+Respond ONLY in the exact format requested. No preamble. No markdown."""
+
+_HAIKU_TRADE_PROMPT = (
+    "You are a trading signal pre-screener. Analyze this text about {ticker}.\n\n"
+    "TEXT: {text}\n\n"
+    "Answer with EXACTLY one of:\n"
+    "ACTIONABLE — clear bullish or bearish signal for {ticker}, price reaction likely\n"
+    "NO_TRADE — neutral, unclear, or no meaningful impact on {ticker}\n\n"
+    "One word answer only."
+)
+
+
+def _haiku_tradeable(ticker: str, text: str, finbert: str) -> bool:
+    """
+    Stufe 1 — Haiku entscheidet ob der Signal handelbar ist (~$0.0002).
+    Nur bei JA folgt der teure Sonnet-Call.
+    """
     try:
+        prompt = _HAIKU_TRADE_PROMPT.format(
+            ticker=ticker,
+            text=text[:800],
+        )
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=5,
+            max_tokens=10,
             temperature=0,
-            messages=[{"role": "user", "content":
-                f"Is {ticker} directly and concretely mentioned or clearly affected "
-                f"in this text? Answer only YES or NO:\n\n{text[:600]}"}],
+            messages=[{"role": "user", "content": prompt}],
         )
-        return "YES" in resp.content[0].text.upper()
+        answer = resp.content[0].text.strip().upper()
+        tradeable = "ACTIONABLE" in answer
+        if not tradeable:
+            print(f"  ⏭️  {ticker} Haiku: NO_TRADE → Sonnet-Call gespart")
+        return tradeable
     except Exception as e:
-        print(f"  ⚠️  Pre-Check Fehler ({ticker}): {e}")
-        return True  # im Zweifel durchlassen
+        print(f"  ⚠️  Haiku Pre-Screen Fehler ({ticker}): {e}")
+        return True  # im Zweifel Sonnet ran lassen
 
 
 def analyze_and_alert(
@@ -1341,18 +1371,17 @@ def analyze_and_alert(
     url:        str,
     confidence: str = "hoch",
 ):
-    # ── Haiku-Pre-Check (nur bei Claude-Inferenz, wo Relevanz unsicher) ──────
-    if confidence == "claude" and not _quick_relevance_check(ticker, raw_text):
-        print(f"  ⏭️  {ticker} Haiku-Pre-Check NEIN → übersprungen")
-        return
-
-    # ── Teure Calls erst nach Pre-Check ──────────────────────────────────────
+    # ── Stufe 0: FinBERT + Marktdaten (günstig, lokal) ───────────────────────
+    finbert_sent = get_finbert_sentiment(raw_text)
     market_data  = fetch_market_data(ticker)
     market_block = format_market_block(ticker)
     holding_info = trump_holding_info(ticker)
-    finbert_sent = get_finbert_sentiment(raw_text)
 
-    # Konfidenz-Beschreibung für Prompt
+    # ── Stufe 1: Haiku-Tradability-Screen (alle Ticker) ───────────────────────
+    if not _haiku_tradeable(ticker, raw_text, finbert_sent):
+        return  # ~$0.0002 statt $0.018 — 99% Ersparnis für diesen Call
+
+    # Konfidenz-Beschreibung für Sonnet-Prompt
     if confidence == "niedrig":
         conf_desc = (
             f"LOW — {ticker} matched only via product/brand keyword, "
@@ -1366,14 +1395,13 @@ def analyze_and_alert(
     else:
         conf_desc = "HIGH — ticker symbol or company name found directly in text."
 
-    price    = market_data.get("price", 0)
-    chg_1d   = market_data.get("chg_1d", 0)
+    price      = market_data.get("price", 0)
+    chg_1d     = market_data.get("chg_1d", 0)
     stop_long  = round(price * 0.92, 2) if price else 0
     stop_short = round(price * 1.08, 2) if price else 0
 
-    prompt = f"""You are a quantitative political-risk analyst specializing in Trump-driven market dislocations. Be precise, factual, and calibrated. Never speculate beyond what the source text directly supports.
-
-SOURCE TEXT:
+    # Dynamischer Teil des Prompts (variabel pro Call)
+    dynamic_prompt = f"""SOURCE TEXT:
 {raw_text}
 
 SOURCE: {source} | PUBLISHED: {published}
@@ -1383,39 +1411,46 @@ MARKET DATA ({ticker}):
 
 DETECTION CONFIDENCE: {conf_desc}
 TRUMP FINANCIAL INTEREST: {holding_info}
+FINBERT: {finbert_sent}
 
-COMPARABLE PRECEDENTS (use for magnitude calibration):
-- Trump tariff tweet on steel (Mar 2018): NUE +8%, X +6% intraday
-- Trump Truth Post attacking Amazon (Apr 2018): AMZN -5% within 2h
-- Trump executive order on TikTok (Aug 2020): SNAP +8%, META +2%
-- Trump China chip export ban (Oct 2022): NVDA -15% over 3 days
-
-Respond ONLY in this exact format. No preamble. No markdown.
+ANALYSIS FORMAT — respond exactly:
 
 RELEVANCE: [YES / NO] — {ticker} is [directly named / sector-affected / tangentially mentioned]
 COMPANY: [Full legal name] ({ticker})
-EVENT_SUMMARY: [One sentence: what Trump said/did, stripped of spin]
-DIRECT_MENTION: [YES / NO] — ticker or company name explicitly in text
+EVENT_SUMMARY: [One sentence: what Trump said/did]
 SENTIMENT: [BULLISH / BEARISH / NEUTRAL] for {ticker}
-SENTIMENT_BASIS: [Quote or paraphrase from text that drives sentiment — max 15 words]
-FINBERT_ALIGNMENT: [AGREES / DISAGREES / PARTIAL] with machine reading of "{finbert_sent}"
+SENTIMENT_BASIS: [Quote from text — max 15 words]
+FINBERT_ALIGNMENT: [AGREES / DISAGREES / PARTIAL]
 PRICE_ALREADY_REACTED: [YES ({chg_1d:+.1f}% today) / NO / UNCLEAR]
-MAGNITUDE_ESTIMATE: [SMALL <3% / MEDIUM 3-10% / LARGE >10%] intraday — [one-sentence rationale]
-TIME_TO_IMPACT: [IMMEDIATE pre/intraday / SHORT 1-5 days / MEDIUM 1-4 weeks / UNCLEAR]
+MAGNITUDE_ESTIMATE: [SMALL <3% / MEDIUM 3-10% / LARGE >10%] — [one-sentence rationale]
+TIME_TO_IMPACT: [IMMEDIATE / SHORT 1-5 days / MEDIUM 1-4 weeks / UNCLEAR]
 TRUMP_CONFLICT_OF_INTEREST: [YES / NO / UNKNOWN]
-SUMMARY: [Max 2 sentences. Only facts from source text. Zero speculation.]
+SUMMARY: [Max 2 sentences. Facts only.]
 TRADE_DIRECTION: [LONG / SHORT / NO_TRADE]
-TRADE_RATIONALE: [Text evidence + current price level ({price:.2f}) in one sentence]
-STOP_LEVEL: [LONG stop: {stop_long:.2f} (−8%) / SHORT stop: {stop_short:.2f} (+8%) / N/A]
-CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor in max 5 words]"""
+TRADE_RATIONALE: [Evidence + price {price:.2f} in one sentence]
+STOP_LEVEL: [LONG: {stop_long:.2f} (−8%) / SHORT: {stop_short:.2f} (+8%) / N/A]
+CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
 
-    # ── Claude-Aufruf (Sonnet) ────────────────────────────────────────────────
+    # ── Stufe 2: Sonnet-Analyse mit Prompt Caching ────────────────────────────
     try:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=900,
+            max_tokens=550,      # war 900 — Antworten sind ~350-500 Token
             temperature=0,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{
+                "role": "user",
+                "content": [
+                    {   # Statischer Block → wird gecacht (90% günstiger ab 2. Call)
+                        "type": "text",
+                        "text": _ANALYSIS_SYSTEM,
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                    {   # Dynamischer Block → nie gecacht
+                        "type": "text",
+                        "text": dynamic_prompt,
+                    },
+                ],
+            }],
         )
         alert_text = response.content[0].text.strip()
     except Exception as e:
