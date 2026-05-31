@@ -14,6 +14,7 @@ from email.utils import parsedate_to_datetime
 from anthropic import Anthropic
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import logging
 import smtplib
 import sys
 import time
@@ -25,6 +26,19 @@ from config import (
     SRC_FEDREGISTER, SRC_EDGAR, SRC_OGE, SEND_NO_TRADE, INCLUDE_RETWEETS,
     confidence_ok, magnitude_ok,
 )
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s UTC [%(levelname)-8s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logging.Formatter.converter = time.gmtime  # Timestamps immer in UTC
+log = logging.getLogger("trump_monitor")
+
+# Externe Libraries auf WARNING setzen — deren DEBUG/INFO-Spam unterdrücken
+for _lib in ("httpx", "httpcore", "anthropic", "urllib3", "feedparser"):
+    logging.getLogger(_lib).setLevel(logging.WARNING)
 
 # Globaler Timeout — gilt für feedparser, smtplib und alle socket-basierten Calls.
 # yfinance nutzt intern requests; dessen Session-Timeout wird separat in
@@ -58,7 +72,7 @@ REQUIRED = {
 }
 missing = [k for k, v in REQUIRED.items() if not v]
 if missing:
-    print(f"❌ Fehlende Secrets: {', '.join(missing)}")
+    log.error(f"❌ Fehlende Secrets: {', '.join(missing)}")
     sys.exit(1)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -125,7 +139,7 @@ def get_finbert_sentiment(text: str) -> str:
     try:
         if _finbert_pipeline is None:
             from transformers import pipeline as hf_pipeline
-            print("  🧠 FinBERT wird geladen …")
+            log.info("  🧠 FinBERT wird geladen …")
             _finbert_pipeline = hf_pipeline(
                 "text-classification",
                 model="ProsusAI/finbert",
@@ -138,7 +152,7 @@ def get_finbert_sentiment(text: str) -> str:
         score = round(result["score"] * 100, 1)
         return f"{label} ({score}%)"
     except Exception as e:
-        print(f"  ⚠️  FinBERT Fehler: {e}")
+        log.warning(f"  ⚠️  FinBERT Fehler: {e}")
         return "nicht verfügbar"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -264,7 +278,7 @@ def is_recent(ts) -> bool:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt >= CUTOFF
     except Exception as e:
-        print(f"  ⚠️  Zeitstempel nicht parsebar ({ts!r}): {e} → übersprungen")
+        log.warning(f"  ⚠️  Zeitstempel nicht parsebar ({ts!r}): {e} → übersprungen")
         return False
 
 def get_hash(text: str) -> str:
@@ -290,14 +304,14 @@ def send_gmail(subject: str, html_body: str) -> bool:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(GMAIL_EMAIL, GMAIL_PASS)
             server.sendmail(GMAIL_EMAIL, RECIPIENT, msg.as_string())
-        print(f"  ✅ E-Mail gesendet: {subject}")
+        log.info(f"  ✅ E-Mail gesendet: {subject}")
         return True
     except smtplib.SMTPAuthenticationError:
-        print("  ❌ Gmail: Authentifizierung fehlgeschlagen – App-Passwort prüfen")
+        log.error("  ❌ Gmail: Authentifizierung fehlgeschlagen – App-Passwort prüfen")
     except smtplib.SMTPException as e:
-        print(f"  ❌ Gmail SMTP-Fehler: {e}")
+        log.error(f"  ❌ Gmail SMTP-Fehler: {e}")
     except Exception as e:
-        print(f"  ❌ Gmail unbekannter Fehler: {e}")
+        log.error(f"  ❌ Gmail unbekannter Fehler: {e}")
     return False
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -413,13 +427,13 @@ def _fetch_truth_scrapecreators() -> list[dict]:
                 })
             return normalized
         except requests.exceptions.Timeout:
-            print(f"  ⚠️  ScapeCreators: Timeout (Versuch {attempt}/3)")
+            log.warning(f"  ⚠️  ScapeCreators: Timeout (Versuch {attempt}/3)")
         except requests.exceptions.HTTPError as e:
-            print(f"  ⚠️  ScapeCreators HTTP-Fehler: {e} (Versuch {attempt}/3)")
+            log.warning(f"  ⚠️  ScapeCreators HTTP-Fehler: {e} (Versuch {attempt}/3)")
             if e.response is not None and e.response.status_code < 500:
                 break
         except Exception as e:
-            print(f"  ⚠️  ScapeCreators Fehler: {e} (Versuch {attempt}/3)")
+            log.warning(f"  ⚠️  ScapeCreators Fehler: {e} (Versuch {attempt}/3)")
         if attempt < 3:
             time.sleep(2 ** attempt)
     return []
@@ -429,13 +443,13 @@ def fetch_truth_social() -> list[dict]:
     """CNN-Archiv zuerst, ScapeCreators als Fallback."""
     try:
         posts = _fetch_truth_cnn()
-        print(f"  Truth Social (CNN-Archiv): {len(posts)} Posts")
+        log.info(f"  Truth Social (CNN-Archiv): {len(posts)} Posts")
         if posts:
             return posts
     except Exception as e:
-        print(f"  ⚠️  CNN-Archiv nicht verfügbar: {e} → ScapeCreators Fallback")
+        log.warning(f"  ⚠️  CNN-Archiv nicht verfügbar: {e} → ScapeCreators Fallback")
     posts = _fetch_truth_scrapecreators()
-    print(f"  Truth Social (ScapeCreators): {len(posts)} Posts")
+    log.info(f"  Truth Social (ScapeCreators): {len(posts)} Posts")
     return posts
 
 
@@ -459,7 +473,7 @@ def fetch_federal_register() -> list[dict]:
         r = requests.get(url, timeout=15)
         r.raise_for_status()
         docs = r.json().get("results", [])
-        print(f"  Federal Register: {len(docs)} Dokumente")
+        log.info(f"  Federal Register: {len(docs)} Dokumente")
         normalized = []
         for d in docs:
             title    = d.get("title", "")
@@ -474,7 +488,7 @@ def fetch_federal_register() -> list[dict]:
             })
         return normalized
     except Exception as e:
-        print(f"  ⚠️  Federal Register Fehler: {e}")
+        log.warning(f"  ⚠️  Federal Register Fehler: {e}")
         return []
 
 
@@ -597,10 +611,10 @@ def fetch_edgar_filings() -> list[dict]:
                     "acc_fmt":   accnos[i] if i < len(accnos) else "",
                     "document":  docs[i]   if i < len(docs)   else "",
                 })
-        print(f"  EDGAR: {len(results)} relevante Filings gefunden")
+        log.info(f"  EDGAR: {len(results)} relevante Filings gefunden")
         return results
     except Exception as e:
-        print(f"  ⚠️  EDGAR Submissions Fehler: {e}")
+        log.warning(f"  ⚠️  EDGAR Submissions Fehler: {e}")
         return []
 
 
@@ -660,7 +674,7 @@ def parse_form4(accession: str, document: str) -> dict:
             "tx_date":   tx_date,
         }
     except Exception as e:
-        print(f"  ⚠️  Form-4-Parse Fehler ({accession}): {e}")
+        log.warning(f"  ⚠️  Form-4-Parse Fehler ({accession}): {e}")
         return {}
 
 
@@ -769,7 +783,7 @@ def send_edgar_alert(filing: dict, details: dict) -> None:
 
     subject = f"{direction_emoji} SEC Alert: Trump {tx_type or form} {ticker or issuer} – {filed}"
     send_gmail(subject, html_body)
-    print(f"  📨 EDGAR Alert gesendet: {form} | {ticker} | {tx_type} | {filed}")
+    log.info(f"  📨 EDGAR Alert gesendet: {form} | {ticker} | {tx_type} | {filed}")
 
 
 EDGAR_LOOKBACK_DAYS = 90  # Nur Filings der letzten 90 Tage alertieren
@@ -780,7 +794,7 @@ def check_edgar_alerts() -> None:
     Prüft neue Filings, parst Form 4, sendet Alert bei unbekannten Transaktionen.
     Datum-Filter verhindert Spam mit historischen Filings beim ersten Run.
     """
-    print("\n🏦 SEC EDGAR …")
+    log.info("\n🏦 SEC EDGAR …")
     filings      = fetch_edgar_filings()
     new_count    = 0
     cutoff_edgar = (now_utc() - timedelta(days=EDGAR_LOOKBACK_DAYS)).date()
@@ -838,7 +852,7 @@ def check_edgar_alerts() -> None:
 
     conn.commit()
     if new_count == 0:
-        print("  EDGAR: Keine neuen Filings")
+        log.info("  EDGAR: Keine neuen Filings")
 
 
 FINANCIAL_RSS_FEEDS = [
@@ -869,19 +883,19 @@ def fetch_financial_rss() -> list[dict]:
             feed = feedparser.parse(url)
             arts = [_rss_to_dict(e, name) for e in feed.entries[:20]]
             results.extend(arts)
-            print(f"  {name}: {len(arts)} Artikel")
+            log.info(f"  {name}: {len(arts)} Artikel")
         except Exception as ex:
-            print(f"  ⚠️  {name} Fehler: {ex}")
+            log.warning(f"  ⚠️  {name} Fehler: {ex}")
     return results
 
 def fetch_whitehouse() -> list:
     try:
         feed    = feedparser.parse("https://www.whitehouse.gov/feed/")
         entries = feed.entries[:30]
-        print(f"  White House RSS: {len(entries)} Einträge")
+        log.info(f"  White House RSS: {len(entries)} Einträge")
         return entries
     except Exception as e:
-        print(f"  ⚠️  White House RSS Fehler: {e}")
+        log.warning(f"  ⚠️  White House RSS Fehler: {e}")
         return []
 
 
@@ -932,7 +946,7 @@ def fetch_oge_ptr_links() -> list[dict]:
                 if OGE_TRUMP_PATTERN.search(pdf) or OGE_TRUMP_PATTERN.search(r.text[:5000]):
                     found.append({"pdf_url": pdf, "source": "OGE Portal"})
     except Exception as e:
-        print(f"  ⚠️  OGE Portal: {e}")
+        log.warning(f"  ⚠️  OGE Portal: {e}")
 
     # — Quelle 2: Whitehouse.gov Disclosures —————————————————————————————————
     try:
@@ -943,7 +957,7 @@ def fetch_oge_ptr_links() -> list[dict]:
                 if OGE_TRUMP_PATTERN.search(pdf) or "periodic" in pdf.lower():
                     found.append({"pdf_url": pdf, "source": "Whitehouse.gov"})
     except Exception as e:
-        print(f"  ⚠️  Whitehouse Disclosures: {e}")
+        log.warning(f"  ⚠️  Whitehouse Disclosures: {e}")
 
     # — Quelle 3: Google News RSS Fallback ———————————————————————————————————
     if not found:
@@ -960,7 +974,7 @@ def fetch_oge_ptr_links() -> list[dict]:
                 if "periodic transaction" in title.lower() or "278" in title:
                     found.append({"pdf_url": link, "source": "Google News / OGE"})
         except Exception as e:
-            print(f"  ⚠️  OGE Google News Fallback: {e}")
+            log.warning(f"  ⚠️  OGE Google News Fallback: {e}")
 
     # Deduplizieren
     seen_urls: set[str] = set()
@@ -981,7 +995,7 @@ def parse_oge_ptr_pdf(pdf_url: str) -> list[dict]:
     try:
         import pdfplumber, io
     except ImportError:
-        print("  ⚠️  pdfplumber nicht installiert — PDF-Parsing übersprungen")
+        log.warning("  ⚠️  pdfplumber nicht installiert — PDF-Parsing übersprungen")
         return []
     try:
         r = requests.get(pdf_url, headers=OGE_HEADERS, timeout=30)
@@ -1024,7 +1038,7 @@ def parse_oge_ptr_pdf(pdf_url: str) -> list[dict]:
                             })
         return transactions
     except Exception as e:
-        print(f"  ⚠️  OGE PDF Parse Fehler ({pdf_url}): {e}")
+        log.warning(f"  ⚠️  OGE PDF Parse Fehler ({pdf_url}): {e}")
         return []
 
 
@@ -1126,7 +1140,7 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
 
     subject = f"🏛️ OGE 278-T: Neuer Trump-Transaktionsbericht ({len(transactions)} Positionen)"
     send_gmail(subject, html_body)
-    print(f"  📨 OGE Alert gesendet: {len(transactions)} Transaktionen | {source}")
+    log.info(f"  📨 OGE Alert gesendet: {len(transactions)} Transaktionen | {source}")
 
 
 def check_oge_alerts() -> None:
@@ -1134,7 +1148,7 @@ def check_oge_alerts() -> None:
     Prüft täglich (via Datum-Check) auf neue OGE 278-T PDFs.
     Sendet Alert nur bei wirklich neuen, noch nicht gesehenen PDFs.
     """
-    print("\n🏛️  OGE 278-T …")
+    log.info("\n🏛️  OGE 278-T …")
 
     # OGE-Tabelle anlegen falls noch nicht vorhanden
     conn.execute("""
@@ -1149,7 +1163,7 @@ def check_oge_alerts() -> None:
 
     links = fetch_oge_ptr_links()
     if not links:
-        print("  OGE: Keine PTR-Links gefunden")
+        log.info("  OGE: Keine PTR-Links gefunden")
         return
 
     new_count = 0
@@ -1164,7 +1178,7 @@ def check_oge_alerts() -> None:
             continue
 
         # Neu — PDF herunterladen und parsen
-        print(f"  📥 Neues OGE PDF: {pdf_url[:80]}…")
+        log.info(f"  📥 Neues OGE PDF: {pdf_url[:80]}…")
         transactions = parse_oge_ptr_pdf(pdf_url)
 
         conn.execute(
@@ -1177,7 +1191,7 @@ def check_oge_alerts() -> None:
         new_count += 1
 
     if new_count == 0:
-        print("  OGE: Keine neuen PTR-Berichte")
+        log.info("  OGE: Keine neuen PTR-Berichte")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TRUMP HOLDINGS  (OGE Form 278 – öffentlich)
@@ -1224,7 +1238,7 @@ def fetch_market_data(ticker: str) -> dict:
             "chg_1m":  round((current / month_ago  - 1) * 100, 2),
         }
     except Exception as e:
-        print(f"  ⚠️  Yahoo Finance ({ticker}): {e}")
+        log.warning(f"  ⚠️  Yahoo Finance ({ticker}): {e}")
         return {}
 
 def format_market_block(ticker: str) -> str:
@@ -1313,10 +1327,10 @@ def discover_tickers_via_claude(text: str) -> list[tuple[str, str]]:
             return []
         tickers = [t.strip() for t in raw.split(",") if re.match(r'^[A-Z]{1,5}$', t.strip())]
         if tickers:
-            print(f"  🔍 Claude Sektor-Erkennung: {tickers}")
+            log.info(f"  🔍 Claude Sektor-Erkennung: {tickers}")
         return [(t, "claude") for t in tickers[:3]]
     except Exception as e:
-        print(f"  ⚠️  Sektor-Erkennung Fehler: {e}")
+        log.warning(f"  ⚠️  Sektor-Erkennung Fehler: {e}")
         return []
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1362,10 +1376,10 @@ def _haiku_tradeable(ticker: str, text: str, finbert: str) -> bool:
         answer = resp.content[0].text.strip().upper()
         tradeable = "ACTIONABLE" in answer
         if not tradeable:
-            print(f"  ⏭️  {ticker} Haiku: NO_TRADE → Sonnet-Call gespart")
+            log.info(f"  ⏭️  {ticker} Haiku: NO_TRADE → Sonnet-Call gespart")
         return tradeable
     except Exception as e:
-        print(f"  ⚠️  Haiku Pre-Screen Fehler ({ticker}): {e}")
+        log.warning(f"  ⚠️  Haiku Pre-Screen Fehler ({ticker}): {e}")
         return True  # im Zweifel Sonnet ran lassen
 
 
@@ -1390,7 +1404,7 @@ def analyze_and_alert(
 
     # Low-Priorität: Tier-3/Claude-Inferenz-Treffer sofort verwerfen
     if priority in ("low", "unknown") and confidence in ("niedrig", "claude"):
-        print(f"  ⏭️  {ticker} [{priority}] + {confidence} Konfidenz → übersprungen")
+        log.info(f"  ⏭️  {ticker} [{priority}] + {confidence} Konfidenz → übersprungen")
         return
 
     # ── Stufe 0: FinBERT + Marktdaten (günstig, lokal) ───────────────────────
@@ -1476,13 +1490,13 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
         )
         alert_text = response.content[0].text.strip()
     except Exception as e:
-        print(f"  ❌ Claude-API Fehler ({ticker}): {e}")
+        log.error(f"  ❌ Claude-API Fehler ({ticker}): {e}")
         return
 
     # ── Relevanz-Gate ────────────────────────────────────────────────────────
     first_line = alert_text.splitlines()[0].upper()
     if "RELEVANCE:" in first_line and "NO" in first_line:
-        print(f"  ⏭️  {ticker} übersprungen – kein konkreter Unternehmensbezug")
+        log.info(f"  ⏭️  {ticker} übersprungen – kein konkreter Unternehmensbezug")
         return
 
     # ── Trade-Richtung, Confidence, Magnitude aus Claude-Output ─────────────
@@ -1506,10 +1520,10 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
 
     # ── Schwellenwert-Gate (aus config.yml) ───────────────────────────────────
     if not confidence_ok(conf_score):
-        print(f"  ⏭️  {ticker} Konfidenz {conf_score} < {MIN_CONFIDENCE} → kein Alert")
+        log.info(f"  ⏭️  {ticker} Konfidenz {conf_score} < {MIN_CONFIDENCE} → kein Alert")
         return
     if not magnitude_ok(magnitude):
-        print(f"  ⏭️  {ticker} Magnitude {magnitude} < {MIN_MAGNITUDE} → kein Alert")
+        log.info(f"  ⏭️  {ticker} Magnitude {magnitude} < {MIN_MAGNITUDE} → kein Alert")
         return
 
     # ── Turbo-Empfehlung ─────────────────────────────────────────────────────
@@ -1525,7 +1539,7 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
         )
         conn.commit()
     except sqlite3.IntegrityError:
-        print(f"  ⏭️  {ticker} bereits in DB – kein doppelter Alert")
+        log.info(f"  ⏭️  {ticker} bereits in DB – kein doppelter Alert")
         return
 
     # ── Konfidenz-Badge ──────────────────────────────────────────────────────
@@ -1689,14 +1703,14 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
 </html>
 """
     if direction == "NO_TRADE" and not SEND_NO_TRADE:
-        print(f"  ⏭️  {ticker} NO_TRADE → kein Alert (config: send_no_trade=false)")
+        log.info(f"  ⏭️  {ticker} NO_TRADE → kein Alert (config: send_no_trade=false)")
         return
 
     dir_emoji = {"LONG": "📈", "SHORT": "📉"}.get(direction, "❓")
     conf_tag  = {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
     subject   = f"{dir_emoji} Trump-Impact – {ticker}{conf_tag} [{direction}] – {source}"
     send_gmail(subject, html_body)
-    print(f"  🎯 Alert gesendet: {ticker} | {direction} | {source} | FinBERT: {finbert_sent}")
+    log.info(f"  🎯 Alert gesendet: {ticker} | {direction} | {source} | FinBERT: {finbert_sent}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BACKTESTING  –  Alert-Outcome nach 24h / 7d nachfüllen
@@ -1721,7 +1735,7 @@ def record_outcomes():
     if not rows:
         return
 
-    print(f"\n📊 Backtesting: {len(rows)} Outcomes zu aktualisieren …")
+    log.info(f"\n📊 Backtesting: {len(rows)} Outcomes zu aktualisieren …")
     for event_id, ticker, processed_at, price_alert, price_24h, price_7d in rows:
         data = fetch_market_data.__wrapped__(ticker)  # Cache umgehen für aktuelle Daten
         if not data:
@@ -1761,7 +1775,7 @@ def record_outcomes():
         """, (event_id, ticker, None, price_alert, price_24h, price_7d, now_utc().isoformat()))
 
     conn.commit()
-    print("  ✅ Outcomes aktualisiert")
+    log.info("  ✅ Outcomes aktualisiert")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1771,18 +1785,18 @@ def main():
     global CUTOFF
     CUTOFF = now_utc() - timedelta(hours=LOOKBACK_HOURS)
 
-    print(f"\n{'═'*62}")
-    print(f"  Trump-Impact Monitor  –  {now_utc().strftime('%Y-%m-%d %H:%M:%S UTC')}")
-    print(f"  Zeitfenster: ab {CUTOFF.strftime('%Y-%m-%d %H:%M UTC')}  (letzte {LOOKBACK_HOURS}h)")
-    print(f"  Modell: {MODEL}")
-    print(f"{'═'*62}\n")
+    log.info(f"\n{'═'*62}")
+    log.info(f"  Trump-Impact Monitor  –  {now_utc().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    log.info(f"  Zeitfenster: ab {CUTOFF.strftime('%Y-%m-%d %H:%M UTC')}  (letzte {LOOKBACK_HOURS}h)")
+    log.info(f"  Modell: {MODEL}")
+    log.info(f"{'═'*62}\n")
 
     processed  = 0
     seen_urls: set[str] = set()
 
     def _cap_reached() -> bool:
         if processed >= MAX_ALERTS_PER_RUN:
-            print(f"  ⚠️  Alert-Cap ({MAX_ALERTS_PER_RUN}) erreicht – verbleibende Artikel übersprungen.")
+            log.warning(f"  ⚠️  Alert-Cap ({MAX_ALERTS_PER_RUN}) erreicht – verbleibende Artikel übersprungen.")
             return True
         return False
 
@@ -1793,7 +1807,7 @@ def main():
         return (high + rest)[:MAX_TICKERS_PER_ART]
 
     # ── Truth Social ──────────────────────────────────────────────────────────
-    print("📡 Truth Social …")
+    log.info("📡 Truth Social …")
     for post in (fetch_truth_social() if SRC_TRUTH else []):
         if _cap_reached():
             break
@@ -1822,7 +1836,7 @@ def main():
             processed += 1
 
     # ── News-RSS (Google News + Finanz-Feeds) ────────────────────────────────
-    print("\n📰 Nachrichten-RSS …")
+    log.info("\n📰 Nachrichten-RSS …")
     for article in (fetch_financial_rss() if SRC_RSS else []):
         if _cap_reached():
             break
@@ -1863,7 +1877,7 @@ def main():
             processed += 1
 
     # ── White House RSS ───────────────────────────────────────────────────────
-    print("\n🏛️  White House RSS …")
+    log.info("\n🏛️  White House RSS …")
     for entry in (fetch_whitehouse() if SRC_WHITEHOUSE else []):
         if _cap_reached():
             break
@@ -1894,7 +1908,7 @@ def main():
             processed += 1
 
     # ── Federal Register (Executive Orders, Proklamationen) ──────────────────
-    print("\n📜 Federal Register …")
+    log.info("\n📜 Federal Register …")
     for doc in (fetch_federal_register() if SRC_FEDREGISTER else []):
         if _cap_reached():
             break
@@ -1939,9 +1953,9 @@ def main():
         check_oge_alerts()
     record_outcomes()
 
-    print(f"\n{'═'*62}")
-    print(f"  ✅ Durchlauf beendet – {processed} Alert(s) verarbeitet")
-    print(f"{'═'*62}\n")
+    log.info(f"\n{'═'*62}")
+    log.info(f"  ✅ Durchlauf beendet – {processed} Alert(s) verarbeitet")
+    log.info(f"{'═'*62}\n")
 
 
 if __name__ == "__main__":
