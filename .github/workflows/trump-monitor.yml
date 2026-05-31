@@ -16,7 +16,7 @@ env:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────
@@ -32,7 +32,7 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      # ── 3. HuggingFace Model Cache (FinBERT ~400 MB) ───────────────
+      # ── 3a. HuggingFace Model Cache (FinBERT ~400 MB) ─────────────
       - name: Cache HuggingFace models
         uses: actions/cache@v4
         with:
@@ -41,9 +41,22 @@ jobs:
           restore-keys: |
             finbert-${{ runner.os }}-
 
+      # ── 3b. Playwright Browser Cache (~300 MB) ─────────────────────
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
       # ── 4. Dependencies ────────────────────────────────────────────
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      # ── 4b. Playwright Chromium (für OGE-Portal JS-Rendering) ──────
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
 
       # ── 5. Run monitor ─────────────────────────────────────────────
       - name: Run Trump Impact Monitor

@@ -938,25 +938,57 @@ def _extract_pdf_links(html_text: str, base_url: str) -> list[str]:
     return links
 
 
+def _oge_via_playwright() -> list[dict]:
+    """
+    OGE-Portal mit Playwright — rendert JavaScript, findet echte PDF-Links.
+    Gibt [{pdf_url, source}] zurück.
+    """
+    try:
+        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    except ImportError:
+        log.warning("Playwright nicht installiert — OGE Portal-Scraping übersprungen")
+        return []
+
+    found = []
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page    = browser.new_page(user_agent=OGE_HEADERS["User-Agent"])
+            page.set_default_timeout(30_000)
+
+            # OGE Portal laden und auf vollständiges Rendering warten
+            page.goto(OGE_PORTAL_URL)
+            try:
+                page.wait_for_load_state("networkidle", timeout=20_000)
+            except PWTimeout:
+                pass  # Seite teilweise geladen reicht meist
+
+            html = page.content()
+            browser.close()
+
+        pdfs = _extract_pdf_links(html, OGE_PORTAL_URL)
+        for pdf in pdfs:
+            if OGE_TRUMP_PATTERN.search(pdf) or OGE_TRUMP_PATTERN.search(html[:8000]):
+                found.append({"pdf_url": pdf, "source": "OGE Portal"})
+                log.info("OGE Portal: Trump-PTR gefunden: %s", pdf)
+
+        log.info("OGE Portal (Playwright): %d Trump-PDFs gefunden", len(found))
+    except Exception as e:
+        log.warning("OGE Playwright Fehler: %s", e)
+    return found
+
+
 def fetch_oge_ptr_links() -> list[dict]:
     """
-    Sucht auf OGE-Portal und Whitehouse.gov nach neuen Trump PTR-PDFs.
+    Sucht auf OGE-Portal (Playwright) und Whitehouse.gov nach neuen Trump PTR-PDFs.
     Gibt [{pdf_url, source}] zurück.
     """
     found: list[dict] = []
 
-    # — Quelle 1: OGE Public Portal ——————————————————————————————————————————
-    try:
-        r = requests.get(OGE_PORTAL_URL, headers=OGE_HEADERS, timeout=20)
-        if r.ok:
-            pdfs = _extract_pdf_links(r.text, OGE_PORTAL_URL)
-            for pdf in pdfs:
-                if OGE_TRUMP_PATTERN.search(pdf) or OGE_TRUMP_PATTERN.search(r.text[:5000]):
-                    found.append({"pdf_url": pdf, "source": "OGE Portal"})
-    except Exception as e:
-        log.warning(f"  ⚠️  OGE Portal: {e}")
+    # — Quelle 1: OGE Public Portal via Playwright (JS-Rendering nötig) ───────
+    found.extend(_oge_via_playwright())
 
-    # — Quelle 2: Whitehouse.gov Disclosures —————————————————————————————————
+    # — Quelle 2: Whitehouse.gov Disclosures (kein JS nötig) ──────────────────
     try:
         r = requests.get(OGE_WH_URL, headers=OGE_HEADERS, timeout=20)
         if r.ok:
@@ -965,7 +997,7 @@ def fetch_oge_ptr_links() -> list[dict]:
                 if OGE_TRUMP_PATTERN.search(pdf) or "periodic" in pdf.lower():
                     found.append({"pdf_url": pdf, "source": "Whitehouse.gov"})
     except Exception as e:
-        log.warning(f"  ⚠️  Whitehouse Disclosures: {e}")
+        log.warning("Whitehouse Disclosures: %s", e)
 
     # — Quelle 3: Google News RSS Fallback ———————————————————————————————————
     if not found:

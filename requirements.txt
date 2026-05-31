@@ -6,3 +6,4 @@ yfinance==0.2.54
 transformers==4.47.1
 torch==2.5.1
 pdfplumber==0.11.4
+playwright==1.49.0
