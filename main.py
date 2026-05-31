@@ -18,6 +18,13 @@ import smtplib
 import sys
 import time
 import xml.etree.ElementTree as ET
+from config import (
+    WATCHLIST_HIGH, WATCHLIST_MEDIUM, WATCHLIST_LOW, WATCHLIST_ALL,
+    MAX_ALERTS, LOOKBACK_HOURS, MIN_CONFIDENCE, MIN_MAGNITUDE,
+    SRC_TRUTH, SRC_RSS, SRC_WHITEHOUSE,
+    SRC_FEDREGISTER, SRC_EDGAR, SRC_OGE, SEND_NO_TRADE, INCLUDE_RETWEETS,
+    confidence_ok, magnitude_ok,
+)
 
 # Globaler Timeout — gilt für feedparser, smtplib und alle socket-basierten Calls.
 # yfinance nutzt intern requests; dessen Session-Timeout wird separat in
@@ -35,9 +42,8 @@ RECIPIENT         = os.getenv("RECIPIENT_EMAIL")
 
 TRUMP_TRUTH_ID       = "107780257626128497"
 DB_PATH              = "alerts.db"
-LOOKBACK_HOURS       = 2     # stündlicher Run → 2h Overlap reicht
-MAX_ALERTS_PER_RUN   = 10   # Schutz vor Kosten-Explosion bei Breaking-News-Wellen
-MAX_TICKERS_PER_ART  = 3    # max. Tickers pro Artikel (hoch vor niedrig)
+MAX_ALERTS_PER_RUN   = MAX_ALERTS  # aus config.yml
+MAX_TICKERS_PER_ART  = 3
 MODEL                = "claude-sonnet-4-6"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1371,15 +1377,31 @@ def analyze_and_alert(
     url:        str,
     confidence: str = "hoch",
 ):
+    # ── Priorität bestimmen (aus config.yml Watch-List) ──────────────────────
+    t_upper = ticker.upper()
+    if t_upper in WATCHLIST_HIGH:
+        priority = "high"
+    elif t_upper in WATCHLIST_MEDIUM:
+        priority = "medium"
+    elif t_upper in WATCHLIST_LOW:
+        priority = "low"
+    else:
+        priority = "unknown"
+
+    # Low-Priorität: Tier-3/Claude-Inferenz-Treffer sofort verwerfen
+    if priority in ("low", "unknown") and confidence in ("niedrig", "claude"):
+        print(f"  ⏭️  {ticker} [{priority}] + {confidence} Konfidenz → übersprungen")
+        return
+
     # ── Stufe 0: FinBERT + Marktdaten (günstig, lokal) ───────────────────────
     finbert_sent = get_finbert_sentiment(raw_text)
     market_data  = fetch_market_data(ticker)
     market_block = format_market_block(ticker)
     holding_info = trump_holding_info(ticker)
 
-    # ── Stufe 1: Haiku-Tradability-Screen (alle Ticker) ───────────────────────
-    if not _haiku_tradeable(ticker, raw_text, finbert_sent):
-        return  # ~$0.0002 statt $0.018 — 99% Ersparnis für diesen Call
+    # ── Stufe 1: Haiku-Tradability-Screen (nur Medium/Low/Unknown) ───────────
+    if priority != "high" and not _haiku_tradeable(ticker, raw_text, finbert_sent):
+        return  # High-Priority-Ticker überspringen diesen Screen
 
     # Konfidenz-Beschreibung für Sonnet-Prompt
     if confidence == "niedrig":
@@ -1463,14 +1485,32 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
         print(f"  ⏭️  {ticker} übersprungen – kein konkreter Unternehmensbezug")
         return
 
-    # ── Trade-Richtung aus neuem Format ──────────────────────────────────────
-    direction = "UNKLAR"
+    # ── Trade-Richtung, Confidence, Magnitude aus Claude-Output ─────────────
+    direction  = "UNKLAR"
+    conf_score = "LOW"
+    magnitude  = "SMALL"
     for line in alert_text.splitlines():
-        if line.upper().startswith("TRADE_DIRECTION:"):
-            if "LONG"     in line.upper(): direction = "LONG"
-            elif "SHORT"  in line.upper(): direction = "SHORT"
-            elif "NO_TRADE" in line.upper(): direction = "NO_TRADE"
-            break
+        u = line.upper()
+        if u.startswith("TRADE_DIRECTION:"):
+            if "LONG"     in u: direction = "LONG"
+            elif "SHORT"  in u: direction = "SHORT"
+            elif "NO_TRADE" in u: direction = "NO_TRADE"
+        elif u.startswith("CONFIDENCE_SCORE:"):
+            if "HIGH"   in u: conf_score = "HIGH"
+            elif "MEDIUM" in u: conf_score = "MEDIUM"
+            else: conf_score = "LOW"
+        elif u.startswith("MAGNITUDE_ESTIMATE:"):
+            if "LARGE"  in u: magnitude = "LARGE"
+            elif "MEDIUM" in u: magnitude = "MEDIUM"
+            else: magnitude = "SMALL"
+
+    # ── Schwellenwert-Gate (aus config.yml) ───────────────────────────────────
+    if not confidence_ok(conf_score):
+        print(f"  ⏭️  {ticker} Konfidenz {conf_score} < {MIN_CONFIDENCE} → kein Alert")
+        return
+    if not magnitude_ok(magnitude):
+        print(f"  ⏭️  {ticker} Magnitude {magnitude} < {MIN_MAGNITUDE} → kein Alert")
+        return
 
     # ── Turbo-Empfehlung ─────────────────────────────────────────────────────
     turbo_dir   = "UNKLAR" if direction == "NO_TRADE" else direction
@@ -1648,8 +1688,8 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
 </body>
 </html>
 """
-    if direction == "NO_TRADE":
-        print(f"  ⏭️  {ticker} NO_TRADE → kein Alert")
+    if direction == "NO_TRADE" and not SEND_NO_TRADE:
+        print(f"  ⏭️  {ticker} NO_TRADE → kein Alert (config: send_no_trade=false)")
         return
 
     dir_emoji = {"LONG": "📈", "SHORT": "📉"}.get(direction, "❓")
@@ -1754,13 +1794,13 @@ def main():
 
     # ── Truth Social ──────────────────────────────────────────────────────────
     print("📡 Truth Social …")
-    for post in fetch_truth_social():
+    for post in (fetch_truth_social() if SRC_TRUTH else []):
         if _cap_reached():
             break
         text = clean_text(post.get("text", post.get("content", "")))
         if not text:
             continue
-        if text.startswith("RT @"):    # Retweets überspringen — kein Original-Signal
+        if text.startswith("RT @") and not INCLUDE_RETWEETS:
             continue
         ts = post.get("created_at", post.get("published"))
         if not is_recent(ts):
@@ -1783,7 +1823,7 @@ def main():
 
     # ── News-RSS (Google News + Finanz-Feeds) ────────────────────────────────
     print("\n📰 Nachrichten-RSS …")
-    for article in fetch_financial_rss():
+    for article in (fetch_financial_rss() if SRC_RSS else []):
         if _cap_reached():
             break
         art_url = article.get("url", "")
@@ -1824,7 +1864,7 @@ def main():
 
     # ── White House RSS ───────────────────────────────────────────────────────
     print("\n🏛️  White House RSS …")
-    for entry in fetch_whitehouse():
+    for entry in (fetch_whitehouse() if SRC_WHITEHOUSE else []):
         if _cap_reached():
             break
         text = clean_text(entry.get("title", "") + " " + entry.get("summary", ""))
@@ -1855,7 +1895,7 @@ def main():
 
     # ── Federal Register (Executive Orders, Proklamationen) ──────────────────
     print("\n📜 Federal Register …")
-    for doc in fetch_federal_register():
+    for doc in (fetch_federal_register() if SRC_FEDREGISTER else []):
         if _cap_reached():
             break
         doc_url = doc.get("url", "")
@@ -1893,8 +1933,10 @@ def main():
             )
             processed += 1
 
-    check_edgar_alerts()
-    check_oge_alerts()
+    if SRC_EDGAR:
+        check_edgar_alerts()
+    if SRC_OGE:
+        check_oge_alerts()
     record_outcomes()
 
     print(f"\n{'═'*62}")

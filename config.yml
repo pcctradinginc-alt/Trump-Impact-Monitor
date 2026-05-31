@@ -1,0 +1,106 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Trump Impact Monitor — Konfiguration
+# Änderungen hier wirken sofort beim nächsten Run, kein Code-Deployment nötig.
+# ─────────────────────────────────────────────────────────────────────────────
+
+watchlist:
+
+  # Sofort durch Sonnet — keine Haiku-Vorfilterung
+  # Diese Ticker sind dir am wichtigsten, Latenz hat Vorrang vor Kosten
+  priority_high:
+    - NVDA
+    - TSLA
+    - AAPL
+    - MSFT
+    - AMZN
+    - META
+    - GOOGL
+    - PLTR
+    - DJT
+    - TSM
+    - INTC
+    - AMD
+    - BA
+    - LMT
+    - XOM
+    - JPM
+    - BTC
+    - ETH
+
+  # Haiku-Screen zuerst — Sonnet nur bei ACTIONABLE
+  priority_medium:
+    - DELL
+    - COIN
+    - MSTR
+    - HOOD
+    - GS
+    - BAC
+    - BLK
+    - RTX
+    - NOC
+    - GD
+    - CVX
+    - COP
+    - NEM
+    - GOLD
+    - GLD
+    - CCJ
+    - ENPH
+    - FSLR
+    - TLT
+    - KWEB
+    - RKLB
+    - KTOS
+
+  # Nur bei direkter Nennung (Tier-1 oder Tier-2 Match) — kein Tier-3/Claude-Inferenz
+  priority_low:
+    - WMT
+    - TGT
+    - COST
+    - NKE
+    - MCD
+    - DIS
+    - NFLX
+    - FOXA
+    - PARA
+    - WBD
+
+thresholds:
+  # Minimale Claude-Konfidenz für E-Mail-Versand: HIGH / MEDIUM / LOW
+  min_confidence_score: MEDIUM
+
+  # Minimale Magnitude für E-Mail-Versand: SMALL / MEDIUM / LARGE
+  # SMALL = <3% intraday — bei vielen False Positives auf MEDIUM erhöhen
+  min_magnitude: SMALL
+
+  # Max. Alerts pro Tag (verhindert Kosten-Explosion bei Breaking-News-Wellen)
+  max_alerts_per_run: 10
+
+  # Stunden Lookback (bei stündlichem Run: 2-3 empfohlen)
+  lookback_hours: 2
+
+sources:
+  # Truth Social via CNN-Archiv (primär) + ScapeCreators (Fallback)
+  truth_social: true
+
+  # Finanz-RSS-Feeds (Reuters, CNBC, MarketWatch etc.)
+  financial_rss: true
+
+  # White House RSS
+  whitehouse_rss: true
+
+  # Federal Register (Executive Orders, Proklamationen)
+  federal_register: true
+
+  # SEC EDGAR Form-4-Monitor (Trump Insider-Transaktionen)
+  edgar_monitor: true
+
+  # OGE 278-T Periodic Transaction Reports
+  oge_monitor: true
+
+alerts:
+  # NO_TRADE-Signale per E-Mail senden? (fast immer false sinnvoll)
+  send_no_trade: false
+
+  # Retweets von Trump's eigenem Account alertieren?
+  include_retweets: false
