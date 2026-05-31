@@ -1266,7 +1266,11 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor in max 5 words]"""
 </body>
 </html>
 """
-    dir_emoji = {"LONG": "📈", "SHORT": "📉", "NO_TRADE": "⛔"}.get(direction, "❓")
+    if direction == "NO_TRADE":
+        print(f"  ⏭️  {ticker} NO_TRADE → kein Alert")
+        return
+
+    dir_emoji = {"LONG": "📈", "SHORT": "📉"}.get(direction, "❓")
     conf_tag  = {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
     subject   = f"{dir_emoji} Trump-Impact – {ticker}{conf_tag} [{direction}] – {source}"
     send_gmail(subject, html_body)
@@ -1373,6 +1377,8 @@ def main():
             break
         text = clean_text(post.get("text", post.get("content", "")))
         if not text:
+            continue
+        if text.startswith("RT @"):    # Retweets überspringen — kein Original-Signal
             continue
         ts = post.get("created_at", post.get("published"))
         if not is_recent(ts):

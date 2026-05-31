@@ -475,9 +475,9 @@
     "weak": ["Ether cryptocurrency", "smart contract ETH"]
   },
   "DJT": {
-    "symbol": ["DJT"],
+    "symbol": [],
     "company": ["Trump Media", "Trump Media & Technology", "Trump Media and Technology", "TMTG"],
-    "weak": []
+    "weak": ["Truth Social stock", "Trump Media stock", "DJT stock", "DJT share"]
   },
   "PHUN": {
     "symbol": ["PHUN"],
