@@ -2,8 +2,10 @@ name: Trump Impact Monitor (hourly)
 
 on:
   schedule:
-    - cron: '0 */4 * * *'  # every 4 hours (6x per day)
-  workflow_dispatch:       # manual trigger via GitHub UI
+    - cron: '0 */4 * * *'    # alle 4 Stunden (6x/Tag)
+    - cron: '25 13 * * 1-5'  # 09:25 ET (5 min vor NYSE-Öffnung, Mo-Fr)
+    - cron: '55 20 * * 1-5'  # 16:55 ET (5 min vor NYSE-Schluss, Mo-Fr)
+  workflow_dispatch:          # manueller Start via GitHub UI
 
 permissions:
   contents: write          # needed for git push (DB update)

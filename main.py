@@ -219,38 +219,55 @@ with open(ENTITIES_FILE, encoding="utf-8") as f:
 
 def find_all_tickers(text: str) -> list[tuple[str, str]]:
     """
-    Gibt alle (ticker, konfidenz) Tupel zurück die im Text gefunden werden.
-
-    Tier 1 – symbol  : case-sensitiv,   immer  → konfidenz "hoch"
-    Tier 2 – company : case-insensitiv, immer  → konfidenz "hoch"
-    Tier 3 – weak    : case-insensitiv, nur mit Finanz-Kontext → "niedrig"
+    Tier 1 – symbol  : case-sensitiv,   immer          → "hoch"
+    Tier 2 – company : case-insensitiv, auch Plural     → "hoch"
+    Tier 3 – weak    : case-insensitiv, Finanzkontext,
+                       Alias-Mindestlänge ≥5            → "niedrig"
+    Tier 4 – Plural-Normalisierung: "Apples" → "Apple"
     """
-    results: list[tuple[str, str]] = []
-    has_finance = is_financially_relevant(text)
+    results:     list[tuple[str, str]] = []
+    seen:        set[str]              = set()
+    has_finance: bool                  = is_financially_relevant(text)
+
+    # Tier 4: Plural/Possessiv normalisieren vor Tier-2-Matching
+    normalized = re.sub(r"'s\b", "", text)                    # Apple's → Apple
+    normalized = re.sub(r"(\b[A-Za-z]{3,})(s)\b",            # Apples → Apple
+                        lambda m: m.group(1), normalized)
 
     for ticker, tiers in ENTITIES.items():
+        t = ticker.upper()
+        if t in seen:
+            continue
         matched = False
 
+        # Tier 1 — Ticker-Symbol, case-sensitiv
         for alias in tiers.get("symbol", []):
-            if re.search(r'\b' + re.escape(alias) + r'\b', text):
-                results.append((ticker.upper(), "hoch"))
+            if alias and re.search(r'\b' + re.escape(alias) + r'\b', text):
+                results.append((t, "hoch"))
+                seen.add(t)
                 matched = True
                 break
         if matched:
             continue
 
+        # Tier 2 — Firmenname/CEO, auch auf normalisiertem Text
         for alias in tiers.get("company", []):
-            if re.search(r'\b' + re.escape(alias) + r'\b', text, re.IGNORECASE):
-                results.append((ticker.upper(), "hoch"))
+            if re.search(r'\b' + re.escape(alias) + r'\b', normalized, re.IGNORECASE):
+                results.append((t, "hoch"))
+                seen.add(t)
                 matched = True
                 break
         if matched:
             continue
 
+        # Tier 3 — schwache Aliases, nur mit Finanzkontext, Mindestlänge ≥5
         if has_finance:
             for alias in tiers.get("weak", []):
-                if re.search(r'\b' + re.escape(alias) + r'\b', text, re.IGNORECASE):
-                    results.append((ticker.upper(), "niedrig"))
+                if len(alias) >= 5 and re.search(
+                    r'\b' + re.escape(alias) + r'\b', text, re.IGNORECASE
+                ):
+                    results.append((t, "niedrig"))
+                    seen.add(t)
                     break
 
     return results
@@ -263,19 +280,24 @@ def fetch_truth_social() -> list[dict]:
         f"https://api.scrapecreators.com/v1/truthsocial/user/posts"
         f"?user_id={TRUMP_TRUTH_ID}&limit=20"
     )
-    try:
-        r = requests.get(url, headers={"x-api-key": SCRAPE_KEY}, timeout=20)
-        r.raise_for_status()
-        data  = r.json()
-        posts = data.get("posts", data.get("data", []))
-        print(f"  Truth Social: {len(posts)} Posts abgerufen")
-        return posts
-    except requests.exceptions.Timeout:
-        print("  ⚠️  Truth Social: Timeout nach 20s")
-    except requests.exceptions.HTTPError as e:
-        print(f"  ⚠️  Truth Social HTTP-Fehler: {e}")
-    except Exception as e:
-        print(f"  ⚠️  Truth Social Fehler: {e}")
+    headers = {"x-api-key": SCRAPE_KEY}
+    for attempt in range(1, 4):
+        try:
+            r = requests.get(url, headers=headers, timeout=20)
+            r.raise_for_status()
+            posts = r.json().get("posts", r.json().get("data", []))
+            print(f"  Truth Social: {len(posts)} Posts abgerufen")
+            return posts
+        except requests.exceptions.Timeout:
+            print(f"  ⚠️  Truth Social: Timeout (Versuch {attempt}/3)")
+        except requests.exceptions.HTTPError as e:
+            print(f"  ⚠️  Truth Social HTTP-Fehler: {e} (Versuch {attempt}/3)")
+            if e.response is not None and e.response.status_code < 500:
+                break  # 4xx nicht wiederholen
+        except Exception as e:
+            print(f"  ⚠️  Truth Social Fehler: {e} (Versuch {attempt}/3)")
+        if attempt < 3:
+            import time; time.sleep(2 ** attempt)  # 2s, 4s
     return []
 
 FINANCIAL_RSS_FEEDS = [
@@ -545,7 +567,7 @@ FINBERT_ALIGNMENT: [AGREES / DISAGREES / PARTIAL] with machine reading of "{finb
 PRICE_ALREADY_REACTED: [YES ({chg_1d:+.1f}% today) / NO / UNCLEAR]
 MAGNITUDE_ESTIMATE: [SMALL <3% / MEDIUM 3-10% / LARGE >10%] intraday — [one-sentence rationale]
 TIME_TO_IMPACT: [IMMEDIATE pre/intraday / SHORT 1-5 days / MEDIUM 1-4 weeks / UNCLEAR]
-TRUMP_CONFLICT_OF_INTEREST: [YES / NO / UNKNOWN] — {holding_info}
+TRUMP_CONFLICT_OF_INTEREST: [YES / NO / UNKNOWN]
 SUMMARY: [Max 2 sentences. Only facts from source text. Zero speculation.]
 TRADE_DIRECTION: [LONG / SHORT / NO_TRADE]
 TRADE_RATIONALE: [Text evidence + current price level ({price:.2f}) in one sentence]
@@ -825,6 +847,8 @@ def main():
         if not is_financially_relevant(text):
             continue
         tickers = find_all_tickers(text)
+        if not tickers:
+            tickers = discover_tickers_via_claude(text)  # Fallback wie bei Truth Social
         if not tickers:
             continue
         for ticker, confidence in _sorted_tickers(tickers):
