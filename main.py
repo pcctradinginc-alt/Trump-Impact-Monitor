@@ -1183,14 +1183,22 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
     log.info(f"  📨 OGE Alert gesendet: {len(transactions)} Transaktionen | {source}")
 
 
+OGE_LOOKBACK_DAYS = 90  # Nur PDFs der letzten 90 Tage alertieren (wie EDGAR)
+
+def _oge_date_from_url(pdf_url: str) -> str:
+    """Extrahiert YYYY/MM aus whitehouse.gov-URL z.B. /2025/06/..."""
+    m = re.search(r'/(\d{4})/(\d{2})/', pdf_url)
+    return f"{m.group(1)}-{m.group(2)}-01" if m else ""
+
+
 def check_oge_alerts() -> None:
     """
-    Prüft täglich (via Datum-Check) auf neue OGE 278-T PDFs.
-    Sendet Alert nur bei wirklich neuen, noch nicht gesehenen PDFs.
+    Prüft auf neue OGE 278-T PDFs.
+    - Datum-Filter: nur PDFs der letzten 90 Tage alertieren
+    - Kein Alert bei 0 erkannten Transaktionen (PDF-Parser versagt)
     """
-    log.info("\n🏛️  OGE 278-T …")
+    log.info("🏛️  OGE 278-T …")
 
-    # OGE-Tabelle anlegen falls noch nicht vorhanden
     conn.execute("""
         CREATE TABLE IF NOT EXISTS oge_ptrs (
             pdf_url     TEXT PRIMARY KEY,
@@ -1203,13 +1211,24 @@ def check_oge_alerts() -> None:
 
     links = fetch_oge_ptr_links()
     if not links:
-        log.info("  OGE: Keine PTR-Links gefunden")
+        log.info("OGE: Keine PTR-Links gefunden")
         return
 
+    cutoff = (now_utc() - timedelta(days=OGE_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
     new_count = 0
+
     for item in links:
         pdf_url = item["pdf_url"]
         source  = item["source"]
+
+        # Datum-Filter: historische PDFs in DB speichern ohne Alert
+        pdf_date = _oge_date_from_url(pdf_url)
+        if pdf_date and pdf_date < cutoff:
+            conn.execute(
+                "INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
+                (pdf_url, source, -1, "HISTORICAL-NO-ALERT"),
+            )
+            continue
 
         exists = conn.execute(
             "SELECT 1 FROM oge_ptrs WHERE pdf_url=?", (pdf_url,)
@@ -1217,8 +1236,7 @@ def check_oge_alerts() -> None:
         if exists:
             continue
 
-        # Neu — PDF herunterladen und parsen
-        log.info(f"  📥 Neues OGE PDF: {pdf_url[:80]}…")
+        log.info("Neues OGE PDF: %s…", pdf_url[:80])
         transactions = parse_oge_ptr_pdf(pdf_url)
 
         conn.execute(
@@ -1227,11 +1245,19 @@ def check_oge_alerts() -> None:
         )
         conn.commit()
 
+        # Bug 2 fix: kein Alert bei 0 erkannten Transaktionen
+        if not transactions:
+            log.warning(
+                "OGE PDF geparst aber 0 Transaktionen erkannt — kein Alert: %s", pdf_url
+            )
+            continue
+
         send_oge_alert(pdf_url, source, transactions)
         new_count += 1
 
+    conn.commit()
     if new_count == 0:
-        log.info("  OGE: Keine neuen PTR-Berichte")
+        log.info("OGE: Keine neuen PTR-Berichte")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TRUMP HOLDINGS  (OGE Form 278 – öffentlich)
