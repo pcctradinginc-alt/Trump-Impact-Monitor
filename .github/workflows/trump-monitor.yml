@@ -1,4 +1,4 @@
-name: Trump Impact Monitor (hourly)
+name: Trump Impact Monitor
 
 on:
   schedule:

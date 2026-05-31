@@ -16,8 +16,12 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import smtplib
 import sys
+import time
 
-socket.setdefaulttimeout(30)  # globaler Timeout für feedparser / yfinance
+# Globaler Timeout — gilt für feedparser, smtplib und alle socket-basierten Calls.
+# yfinance nutzt intern requests; dessen Session-Timeout wird separat in
+# fetch_market_data gesetzt (timeout= Parameter).
+socket.setdefaulttimeout(30)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG  (alle Werte kommen aus GitHub Secrets / lokalen Env-Vars)
@@ -54,6 +58,8 @@ if missing:
 # SQLITE  –  Dedup-Datenbank
 # ─────────────────────────────────────────────────────────────────────────────
 conn = sqlite3.connect(DB_PATH)
+conn.execute("PRAGMA journal_mode=WAL")   # verhindert DB-Korruption bei parallelen Runs
+conn.execute("PRAGMA synchronous=NORMAL") # WAL + NORMAL: schnell und sicher
 conn.execute("""
     CREATE TABLE IF NOT EXISTS events (
         event_id     TEXT PRIMARY KEY,
@@ -63,6 +69,17 @@ conn.execute("""
         hash         TEXT UNIQUE,
         ticker       TEXT,
         processed_at TEXT
+    )
+""")
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS outcomes (
+        event_id     TEXT PRIMARY KEY,
+        ticker       TEXT,
+        direction    TEXT,
+        price_alert  REAL,
+        price_24h    REAL,
+        price_7d     REAL,
+        checked_at   TEXT
     )
 """)
 conn.commit()
@@ -297,7 +314,7 @@ def fetch_truth_social() -> list[dict]:
         except Exception as e:
             print(f"  ⚠️  Truth Social Fehler: {e} (Versuch {attempt}/3)")
         if attempt < 3:
-            import time; time.sleep(2 ** attempt)  # 2s, 4s
+            time.sleep(2 ** attempt)  # 2s, 4s
     return []
 
 FINANCIAL_RSS_FEEDS = [
@@ -306,6 +323,10 @@ FINANCIAL_RSS_FEEDS = [
     ("MarketWatch",      "https://feeds.marketwatch.com/marketwatch/topstories/"),
     ("Yahoo Finance",    "https://finance.yahoo.com/rss/topstories"),
     ("AP Business",      "https://feeds.apnews.com/apnews/businessnews"),
+    # Trump-spezifische Feeds
+    ("Google News Trump", "https://news.google.com/rss/search?q=trump+tariff+trade&hl=en-US&gl=US&ceid=US:en"),
+    ("Google News Trump Markets", "https://news.google.com/rss/search?q=trump+stock+market+executive+order&hl=en-US&gl=US&ceid=US:en"),
+    ("Politico Economy",  "https://rss.politico.com/economy.xml"),
 ]
 
 def _rss_to_dict(entry, source: str) -> dict:
@@ -368,7 +389,8 @@ def fetch_market_data(ticker: str) -> dict:
     """Holt 1-Monats-History von Yahoo Finance. Bei Fehler leeres Dict."""
     yf_sym = YF_TICKER_MAP.get(ticker.upper(), ticker.upper())
     try:
-        hist = yf.Ticker(yf_sym).history(period="1mo", auto_adjust=True)
+        hist = yf.Ticker(yf_sym).history(period="1mo", auto_adjust=True,
+                                          timeout=15)
         if hist.empty or len(hist) < 2:
             return {}
         close      = hist["Close"]
@@ -771,6 +793,72 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor in max 5 words]"""
     print(f"  🎯 Alert gesendet: {ticker} | {direction} | {source} | FinBERT: {finbert_sent}")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# BACKTESTING  –  Alert-Outcome nach 24h / 7d nachfüllen
+# ─────────────────────────────────────────────────────────────────────────────
+def record_outcomes():
+    """
+    Lädt alle Events ohne vollständige Outcome-Daten und füllt
+    price_24h / price_7d nach, sobald genug Zeit vergangen ist.
+    Ermöglicht spätere Trefferquoten-Analyse per SQL.
+    """
+    rows = conn.execute("""
+        SELECT e.event_id, e.ticker, e.processed_at,
+               o.price_alert, o.price_24h, o.price_7d
+        FROM events e
+        LEFT JOIN outcomes o ON e.event_id = o.event_id
+        WHERE o.event_id IS NULL
+           OR (o.price_24h IS NULL AND e.processed_at < datetime('now', '-25 hours'))
+           OR (o.price_7d  IS NULL AND e.processed_at < datetime('now', '-8 days'))
+        LIMIT 20
+    """).fetchall()
+
+    if not rows:
+        return
+
+    print(f"\n📊 Backtesting: {len(rows)} Outcomes zu aktualisieren …")
+    for event_id, ticker, processed_at, price_alert, price_24h, price_7d in rows:
+        data = fetch_market_data.__wrapped__(ticker)  # Cache umgehen für aktuelle Daten
+        if not data:
+            continue
+        current = data.get("price")
+
+        # Alert-Preis beim ersten Mal setzen
+        if price_alert is None:
+            price_alert = current
+
+        # 24h-Preis: nur setzen wenn >25h vergangen
+        if price_24h is None:
+            try:
+                alert_dt = datetime.fromisoformat(processed_at.replace("Z", "+00:00"))
+                if (now_utc() - alert_dt).total_seconds() > 90000:
+                    price_24h = current
+            except Exception:
+                pass
+
+        # 7d-Preis: nur setzen wenn >8 Tage vergangen
+        if price_7d is None:
+            try:
+                alert_dt = datetime.fromisoformat(processed_at.replace("Z", "+00:00"))
+                if (now_utc() - alert_dt).total_seconds() > 691200:
+                    price_7d = current
+            except Exception:
+                pass
+
+        conn.execute("""
+            INSERT INTO outcomes (event_id, ticker, direction, price_alert, price_24h, price_7d, checked_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(event_id) DO UPDATE SET
+                price_alert = COALESCE(excluded.price_alert, price_alert),
+                price_24h   = COALESCE(excluded.price_24h,   price_24h),
+                price_7d    = COALESCE(excluded.price_7d,    price_7d),
+                checked_at  = excluded.checked_at
+        """, (event_id, ticker, None, price_alert, price_24h, price_7d, now_utc().isoformat()))
+
+    conn.commit()
+    print("  ✅ Outcomes aktualisiert")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
@@ -896,6 +984,8 @@ def main():
                 confidence,
             )
             processed += 1
+
+    record_outcomes()
 
     print(f"\n{'═'*62}")
     print(f"  ✅ Durchlauf beendet – {processed} Alert(s) verarbeitet")

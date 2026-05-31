@@ -2519,5 +2519,54 @@
     "symbol": ["RCAT"],
     "company": ["Red Cat Holdings"],
     "weak": ["military drone", "defense drone"]
+  },
+
+  "SAIC": {
+    "symbol": ["SAIC"],
+    "company": ["Science Applications International", "SAIC Inc"],
+    "weak": ["government IT contract", "federal IT"]
+  },
+  "CACI": {
+    "symbol": ["CACI"],
+    "company": ["CACI International"],
+    "weak": ["defense IT services", "intelligence contract"]
+  },
+  "BWXT": {
+    "symbol": ["BWXT"],
+    "company": ["BWX Technologies"],
+    "weak": ["nuclear propulsion", "naval nuclear reactor"]
+  },
+
+  "DJT": {
+    "symbol": ["DJT"],
+    "company": ["Trump Media", "Trump Media & Technology", "Trump Media and Technology", "TMTG"],
+    "weak": ["Truth Social platform"]
+  },
+
+  "DOGE": {
+    "symbol": [],
+    "company": ["Dogecoin"],
+    "weak": ["doge cryptocurrency", "doge coin", "Department of Government Efficiency"]
+  },
+
+  "XBI": {
+    "symbol": ["XBI"],
+    "company": ["SPDR S&P Biotech ETF"],
+    "weak": ["biotech etf", "biotech stocks", "FDA approval", "drug pricing"]
+  },
+  "ITA": {
+    "symbol": ["ITA"],
+    "company": ["iShares U.S. Aerospace & Defense ETF"],
+    "weak": ["defense etf", "aerospace stocks", "defense spending"]
+  },
+  "SPY": {
+    "symbol": ["SPY"],
+    "company": ["SPDR S&P 500 ETF"],
+    "weak": ["S&P 500", "stock market crash", "market selloff", "market rally"]
+  },
+  "QQQ": {
+    "symbol": ["QQQ"],
+    "company": ["Invesco QQQ Trust", "Nasdaq 100 ETF"],
+    "weak": ["Nasdaq", "tech stocks selloff", "tech rally"]
   }
 }
