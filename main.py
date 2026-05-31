@@ -292,30 +292,117 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 # DATA SOURCES
 # ─────────────────────────────────────────────────────────────────────────────
-def fetch_truth_social() -> list[dict]:
-    url = (
-        f"https://api.scrapecreators.com/v1/truthsocial/user/posts"
-        f"?user_id={TRUMP_TRUTH_ID}&limit=20"
-    )
+
+CNN_ARCHIVE_URL = "https://ix.cnn.io/data/truth-social/truth_archive.json"
+
+def _fetch_truth_cnn() -> list[dict]:
+    """
+    Primärquelle: CNN Truth Social JSON-Archiv (~5min Refresh).
+    Kein API-Key, keine Kosten. Gibt Posts im internen Format zurück.
+    """
+    r = requests.get(CNN_ARCHIVE_URL, timeout=15)
+    r.raise_for_status()
+    raw = r.json()
+    # Format: Liste von Objekten oder {"posts": [...]}
+    posts = raw if isinstance(raw, list) else raw.get("posts", raw.get("data", []))
+    # Normalisierung auf einheitliches Format
+    normalized = []
+    for p in posts:
+        normalized.append({
+            "text":       p.get("content", p.get("text", p.get("body", ""))),
+            "created_at": p.get("created_at", p.get("published_at", p.get("date", ""))),
+            "url":        p.get("url", p.get("uri", p.get("link",
+                          "https://truthsocial.com/@realDonaldTrump"))),
+            "_source":    "CNN-Archiv",
+        })
+    return normalized
+
+
+def _fetch_truth_scrapecreators() -> list[dict]:
+    """Fallback: ScapeCreators API (kostenpflichtig, aber zuverlässig)."""
+    url     = (f"https://api.scrapecreators.com/v1/truthsocial/user/posts"
+               f"?user_id={TRUMP_TRUTH_ID}&limit=20")
     headers = {"x-api-key": SCRAPE_KEY}
     for attempt in range(1, 4):
         try:
             r = requests.get(url, headers=headers, timeout=20)
             r.raise_for_status()
             posts = r.json().get("posts", r.json().get("data", []))
-            print(f"  Truth Social: {len(posts)} Posts abgerufen")
-            return posts
+            # Normalisierung
+            normalized = []
+            for p in posts:
+                normalized.append({
+                    "text":       p.get("text", p.get("content", "")),
+                    "created_at": p.get("created_at", p.get("published", "")),
+                    "url":        p.get("url", p.get("uri",
+                                  "https://truthsocial.com/@realDonaldTrump")),
+                    "_source":    "ScapeCreators",
+                })
+            return normalized
         except requests.exceptions.Timeout:
-            print(f"  ⚠️  Truth Social: Timeout (Versuch {attempt}/3)")
+            print(f"  ⚠️  ScapeCreators: Timeout (Versuch {attempt}/3)")
         except requests.exceptions.HTTPError as e:
-            print(f"  ⚠️  Truth Social HTTP-Fehler: {e} (Versuch {attempt}/3)")
+            print(f"  ⚠️  ScapeCreators HTTP-Fehler: {e} (Versuch {attempt}/3)")
             if e.response is not None and e.response.status_code < 500:
-                break  # 4xx nicht wiederholen
+                break
         except Exception as e:
-            print(f"  ⚠️  Truth Social Fehler: {e} (Versuch {attempt}/3)")
+            print(f"  ⚠️  ScapeCreators Fehler: {e} (Versuch {attempt}/3)")
         if attempt < 3:
-            time.sleep(2 ** attempt)  # 2s, 4s
+            time.sleep(2 ** attempt)
     return []
+
+
+def fetch_truth_social() -> list[dict]:
+    """CNN-Archiv zuerst, ScapeCreators als Fallback."""
+    try:
+        posts = _fetch_truth_cnn()
+        print(f"  Truth Social (CNN-Archiv): {len(posts)} Posts")
+        if posts:
+            return posts
+    except Exception as e:
+        print(f"  ⚠️  CNN-Archiv nicht verfügbar: {e} → ScapeCreators Fallback")
+    posts = _fetch_truth_scrapecreators()
+    print(f"  Truth Social (ScapeCreators): {len(posts)} Posts")
+    return posts
+
+
+def fetch_federal_register() -> list[dict]:
+    """
+    Federal Register API — Executive Orders, Proklamationen, Presidential Documents.
+    Kein API-Key nötig. Täglich morgens aktualisiert.
+    """
+    url = (
+        "https://www.federalregister.gov/api/v1/documents.json"
+        "?conditions[president][]=donald-trump"
+        "&conditions[type][]=PRESDOCU"
+        "&conditions[type][]=EXECORD"
+        "&conditions[type][]=PROCLAM"
+        "&order=publication_date"
+        "&per_page=20"
+        "&fields[]=title&fields[]=publication_date&fields[]=abstract"
+        "&fields[]=html_url&fields[]=document_number&fields[]=type"
+    )
+    try:
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+        docs = r.json().get("results", [])
+        print(f"  Federal Register: {len(docs)} Dokumente")
+        normalized = []
+        for d in docs:
+            title    = d.get("title", "")
+            abstract = d.get("abstract", "") or ""
+            doc_type = d.get("type", "Presidential Document")
+            normalized.append({
+                "title":       f"[{doc_type}] {title}",
+                "description": abstract[:500],
+                "publishedAt": d.get("publication_date", ""),
+                "url":         d.get("html_url", "https://www.federalregister.gov"),
+                "_source":     "Federal Register",
+            })
+        return normalized
+    except Exception as e:
+        print(f"  ⚠️  Federal Register Fehler: {e}")
+        return []
 
 FINANCIAL_RSS_FEEDS = [
     ("Reuters Business", "https://feeds.reuters.com/reuters/businessNews"),
@@ -981,6 +1068,46 @@ def main():
                 text,
                 ticker,
                 entry.get("link", "https://www.whitehouse.gov"),
+                confidence,
+            )
+            processed += 1
+
+    # ── Federal Register (Executive Orders, Proklamationen) ──────────────────
+    print("\n📜 Federal Register …")
+    for doc in fetch_federal_register():
+        if _cap_reached():
+            break
+        doc_url = doc.get("url", "")
+        if doc_url and doc_url in seen_urls:
+            continue
+        if doc_url:
+            seen_urls.add(doc_url)
+        text = clean_text(
+            (doc.get("title") or "") + " " + (doc.get("description") or "")
+        )
+        if not text:
+            continue
+        if not is_recent(doc.get("publishedAt")):
+            continue
+        if not is_financially_relevant(text):
+            tickers = discover_tickers_via_claude(text)  # EOs haben oft keinen direkten Ticker
+        else:
+            tickers = find_all_tickers(text)
+            if not tickers:
+                tickers = discover_tickers_via_claude(text)
+        if not tickers:
+            continue
+        for ticker, confidence in _sorted_tickers(tickers):
+            if _cap_reached():
+                break
+            if already_seen(event_hash(ticker, text)):
+                continue
+            analyze_and_alert(
+                "Federal Register",
+                doc.get("publishedAt", ""),
+                text,
+                ticker,
+                doc_url,
                 confidence,
             )
             processed += 1
