@@ -17,6 +17,7 @@ from email.mime.multipart import MIMEMultipart
 import smtplib
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 # Globaler Timeout — gilt für feedparser, smtplib und alle socket-basierten Calls.
 # yfinance nutzt intern requests; dessen Session-Timeout wird separat in
@@ -80,6 +81,20 @@ conn.execute("""
         price_24h    REAL,
         price_7d     REAL,
         checked_at   TEXT
+    )
+""")
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS edgar_filings (
+        accession    TEXT PRIMARY KEY,
+        form_type    TEXT,
+        filed_date   TEXT,
+        ticker       TEXT,
+        issuer       TEXT,
+        tx_type      TEXT,
+        tx_shares    TEXT,
+        tx_price     TEXT,
+        tx_date      TEXT,
+        alerted_at   TEXT
     )
 """)
 conn.commit()
@@ -403,6 +418,339 @@ def fetch_federal_register() -> list[dict]:
     except Exception as e:
         print(f"  ⚠️  Federal Register Fehler: {e}")
         return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRUMP BEKANNTE POSITIONEN  (manuell gepflegt, Stand: öffentliche Quellen)
+# ─────────────────────────────────────────────────────────────────────────────
+TRUMP_KNOWN_HOLDINGS = [
+    {
+        "asset":    "Trump Media & Technology Group (DJT)",
+        "type":     "Aktie (börsennotiert)",
+        "stake":    "~57 % / ~114 Mio. Shares",
+        "disclosed": "2024-09-20",
+        "source":   "SEC Form 4",
+        "url":      "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000947033&type=4",
+    },
+    {
+        "asset":    "TRUMP Memecoin (Official Trump)",
+        "type":     "Kryptowährung",
+        "stake":    "~80 % bei Trump-nahen Entitäten (200 Mio. von 250 Mio. Token)",
+        "disclosed": "2025-01-17",
+        "source":   "Projektwebsite / Whitepaper",
+        "url":      "https://gettrumpmemes.com",
+    },
+    {
+        "asset":    "MELANIA Memecoin",
+        "type":     "Kryptowährung",
+        "stake":    "~87.75 % bei Melania-nahen Entitäten",
+        "disclosed": "2025-01-19",
+        "source":   "Projektwebsite",
+        "url":      "https://melaniameme.com",
+    },
+    {
+        "asset":    "World Liberty Financial (WLFI Token)",
+        "type":     "DeFi / Crypto",
+        "stake":    "~75 % der Token bei Trump-Familie (ca. 22.5 Mrd. Token)",
+        "disclosed": "2024-10-15",
+        "source":   "WLFI Whitepaper",
+        "url":      "https://worldlibertyfinancial.com",
+    },
+    {
+        "asset":    "Diverse Aktien (Costco, Meta, Pfizer u.a.)",
+        "type":     "Aktien-Portfolio",
+        "stake":    "Wertspannen laut OGE Form 278e (keine exakten Stückzahlen)",
+        "disclosed": "2025 (jährliche Offenlegung)",
+        "source":   "OGE Form 278e",
+        "url":      "https://extapps2.oge.gov/201/Presiden.nsf",
+    },
+]
+
+
+def holdings_html_block() -> str:
+    """Generiert HTML-Tabelle aller bekannten Trump-Positionen für E-Mail-Footer."""
+    rows = ""
+    for h in TRUMP_KNOWN_HOLDINGS:
+        rows += (
+            f'<tr>'
+            f'<td style="padding:6px 12px 6px 0;font-size:12px;color:#1d1d1f;'
+            f'vertical-align:top;border-bottom:1px solid #f0f0f0;">'
+            f'<a href="{h["url"]}" style="color:#0071e3;text-decoration:none;">'
+            f'{h["asset"]}</a></td>'
+            f'<td style="padding:6px 12px 6px 0;font-size:12px;color:#6e6e73;'
+            f'vertical-align:top;border-bottom:1px solid #f0f0f0;">{h["type"]}</td>'
+            f'<td style="padding:6px 12px 6px 0;font-size:12px;color:#1d1d1f;'
+            f'vertical-align:top;border-bottom:1px solid #f0f0f0;">{h["stake"]}</td>'
+            f'<td style="padding:6px 0 6px 0;font-size:11px;color:#6e6e73;'
+            f'vertical-align:top;border-bottom:1px solid #f0f0f0;white-space:nowrap;">'
+            f'{h["disclosed"]}<br><span style="font-size:10px;">{h["source"]}</span></td>'
+            f'</tr>'
+        )
+    return f"""
+<table style="border-collapse:collapse;width:100%;margin-top:4px;">
+  <thead>
+    <tr>
+      <th style="padding:0 12px 8px 0;font-size:11px;font-weight:600;color:#6e6e73;
+          text-align:left;text-transform:uppercase;letter-spacing:0.06em;">Position</th>
+      <th style="padding:0 12px 8px 0;font-size:11px;font-weight:600;color:#6e6e73;
+          text-align:left;text-transform:uppercase;letter-spacing:0.06em;">Typ</th>
+      <th style="padding:0 12px 8px 0;font-size:11px;font-weight:600;color:#6e6e73;
+          text-align:left;text-transform:uppercase;letter-spacing:0.06em;">Beteiligung</th>
+      <th style="padding:0 0 8px 0;font-size:11px;font-weight:600;color:#6e6e73;
+          text-align:left;text-transform:uppercase;letter-spacing:0.06em;">Offengelegt</th>
+    </tr>
+  </thead>
+  <tbody>{rows}</tbody>
+</table>"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEC EDGAR  –  Trump Insider-Transaktions-Monitor
+# ─────────────────────────────────────────────────────────────────────────────
+TRUMP_CIK      = "0000947033"
+EDGAR_BASE     = "https://data.sec.gov"
+EDGAR_ARCHIVE  = "https://www.sec.gov/Archives/edgar/data/947033"
+EDGAR_HEADERS  = {"User-Agent": "TrumpImpactMonitor research@trump-monitor.local"}
+
+WATCHED_FORMS  = {"4", "4/A", "SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"}
+
+
+def fetch_edgar_filings() -> list[dict]:
+    """Holt aktuelle SEC-Filings für Trump CIK via EDGAR Submissions API."""
+    try:
+        r = requests.get(
+            f"{EDGAR_BASE}/submissions/CIK{TRUMP_CIK}.json",
+            headers=EDGAR_HEADERS, timeout=15,
+        )
+        r.raise_for_status()
+        recent   = r.json().get("filings", {}).get("recent", {})
+        forms    = recent.get("form", [])
+        dates    = recent.get("filingDate", [])
+        accnos   = recent.get("accessionNumber", [])
+        docs     = recent.get("primaryDocument", [])
+        results  = []
+        for i, form in enumerate(forms):
+            if form in WATCHED_FORMS:
+                acc_clean = accnos[i].replace("-", "") if i < len(accnos) else ""
+                results.append({
+                    "form":      form,
+                    "date":      dates[i]  if i < len(dates)  else "",
+                    "accession": acc_clean,
+                    "acc_fmt":   accnos[i] if i < len(accnos) else "",
+                    "document":  docs[i]   if i < len(docs)   else "",
+                })
+        print(f"  EDGAR: {len(results)} relevante Filings gefunden")
+        return results
+    except Exception as e:
+        print(f"  ⚠️  EDGAR Submissions Fehler: {e}")
+        return []
+
+
+def parse_form4(accession: str, document: str) -> dict:
+    """
+    Parst Form-4-XML und gibt Transaktionsdetails zurück.
+    Gibt leeres Dict zurück wenn kein XML verfügbar.
+    """
+    url = f"{EDGAR_ARCHIVE}/{accession}/{document}"
+    try:
+        r = requests.get(url, headers=EDGAR_HEADERS, timeout=15)
+        r.raise_for_status()
+        root = ET.fromstring(r.text)
+        ns   = ""  # Form 4 XML hat keinen Namespace
+
+        def get(path: str) -> str:
+            el = root.find(path)
+            return el.text.strip() if el is not None and el.text else ""
+
+        issuer = get(".//issuerName")
+        ticker = get(".//issuerTradingSymbol")
+
+        # Erste Non-Derivative-Transaktion auslesen
+        tx = root.find(".//nonDerivativeTransaction")
+        if tx is None:
+            tx = root.find(".//derivativeTransaction")
+
+        tx_date   = ""
+        tx_shares = ""
+        tx_price  = ""
+        tx_type   = ""
+
+        if tx is not None:
+            tx_date   = (tx.findtext(".//transactionDate/value") or "").strip()
+            tx_shares = (tx.findtext(".//transactionShares/value") or
+                         tx.findtext(".//transactionTotalValue/value") or "").strip()
+            tx_price  = (tx.findtext(".//transactionPricePerShare/value") or "").strip()
+            code      = (tx.findtext(".//transactionAcquiredDisposedCode/value") or "").strip().upper()
+            tx_type   = "KAUF" if code == "A" else "VERKAUF" if code == "D" else code
+
+        return {
+            "issuer":    issuer,
+            "ticker":    ticker.upper() if ticker else "",
+            "tx_type":   tx_type,
+            "tx_shares": tx_shares,
+            "tx_price":  tx_price,
+            "tx_date":   tx_date,
+        }
+    except Exception as e:
+        print(f"  ⚠️  Form-4-Parse Fehler ({accession}): {e}")
+        return {}
+
+
+def send_edgar_alert(filing: dict, details: dict) -> None:
+    """Sendet Apple-Style E-Mail Alert für neue EDGAR-Transaktion."""
+    form      = filing["form"]
+    filed     = filing["date"]
+    acc_fmt   = filing["acc_fmt"]
+    ticker    = details.get("ticker", "")
+    issuer    = details.get("issuer", "Unbekannt")
+    tx_type   = details.get("tx_type", "")
+    tx_shares = details.get("tx_shares", "")
+    tx_price  = details.get("tx_price", "")
+    tx_date   = details.get("tx_date", filed)
+
+    direction_emoji = "📈" if tx_type == "KAUF" else "📉" if tx_type == "VERKAUF" else "📋"
+    edgar_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={TRUMP_CIK}&type={form}"
+
+    price_str  = f"${float(tx_price):.2f}" if tx_price else "k.A."
+    shares_str = f"{float(tx_shares):,.0f}" if tx_shares else "k.A."
+
+    market_note = ""
+    if ticker:
+        data = fetch_market_data(ticker)
+        if data:
+            market_note = (
+                f'<div style="background:#f5f5f7;border-radius:10px;padding:14px 18px;margin-top:12px;">'
+                f'<pre style="margin:0;font-family:\'SF Mono\',Menlo,monospace;font-size:12px;'
+                f'line-height:1.6;color:#1d1d1f;">{format_market_block(ticker)}</pre></div>'
+            )
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="de">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f7;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f7;padding:32px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+
+  <tr><td style="background:#1d1d1f;border-radius:16px 16px 0 0;padding:28px 32px;">
+    <p style="margin:0 0 4px 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      SEC EDGAR · {form}
+    </p>
+    <h1 style="margin:0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:26px;font-weight:700;color:#f5f5f7;letter-spacing:-0.02em;">
+      {direction_emoji} Trump: {tx_type or form} {ticker or issuer}
+    </h1>
+    <p style="margin:8px 0 0 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:13px;color:#6e6e73;">
+      Eingereicht: {filed} &nbsp;·&nbsp; Transaktion: {tx_date}
+    </p>
+  </td></tr>
+
+  <tr><td style="background:#ffffff;padding:24px 32px 20px;">
+    <p style="margin:0 0 10px 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Transaktionsdetails
+    </p>
+    <table style="border-collapse:collapse;width:100%;">
+      <tr><td style="padding:8px 0;font-size:13px;color:#6e6e73;width:140px;">Emittent</td>
+          <td style="padding:8px 0;font-size:13px;color:#1d1d1f;">{issuer}</td></tr>
+      <tr><td style="padding:8px 0;font-size:13px;color:#6e6e73;">Ticker</td>
+          <td style="padding:8px 0;font-size:14px;font-weight:700;color:#1d1d1f;">{ticker or "–"}</td></tr>
+      <tr><td style="padding:8px 0;font-size:13px;color:#6e6e73;">Typ</td>
+          <td style="padding:8px 0;font-size:13px;color:#1d1d1f;">{tx_type or form}</td></tr>
+      <tr><td style="padding:8px 0;font-size:13px;color:#6e6e73;">Stückzahl</td>
+          <td style="padding:8px 0;font-size:13px;color:#1d1d1f;">{shares_str}</td></tr>
+      <tr><td style="padding:8px 0;font-size:13px;color:#6e6e73;">Preis/Stück</td>
+          <td style="padding:8px 0;font-size:13px;color:#1d1d1f;">{price_str}</td></tr>
+      <tr><td style="padding:8px 0;font-size:13px;color:#6e6e73;">Accession</td>
+          <td style="padding:8px 0;font-size:11px;color:#6e6e73;">{acc_fmt}</td></tr>
+    </table>
+    {market_note}
+    <p style="margin:14px 0 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:12px;">
+      <a href="{edgar_url}" style="color:#0071e3;text-decoration:none;">Auf SEC EDGAR ansehen ↗</a>
+    </p>
+  </td></tr>
+
+  <tr><td style="background:#ffffff;padding:0 32px;">
+    <div style="border-top:1px solid #e5e5ea;"></div>
+  </td></tr>
+
+  <tr><td style="background:#ffffff;padding:20px 32px 24px;">
+    <p style="margin:0 0 12px 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Alle bekannten Trump-Positionen
+    </p>
+    <div style="font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;">
+      {holdings_html_block()}
+    </div>
+  </td></tr>
+
+  <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:16px 32px;
+       border-top:1px solid #e5e5ea;">
+    <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
+       font-size:11px;color:#6e6e73;">
+      Quelle: SEC EDGAR · Filer CIK {TRUMP_CIK} ·
+      Generiert: {now_utc().strftime('%Y-%m-%d %H:%M UTC')}
+    </p>
+  </td></tr>
+
+</table></td></tr></table>
+</body></html>"""
+
+    subject = f"{direction_emoji} SEC Alert: Trump {tx_type or form} {ticker or issuer} – {filed}"
+    send_gmail(subject, html_body)
+    print(f"  📨 EDGAR Alert gesendet: {form} | {ticker} | {tx_type} | {filed}")
+
+
+def check_edgar_alerts() -> None:
+    """
+    Hauptfunktion für EDGAR-Monitoring.
+    Prüft neue Filings, parst Form 4, sendet Alert bei unbekannten Transaktionen.
+    """
+    print("\n🏦 SEC EDGAR …")
+    filings = fetch_edgar_filings()
+    new_count = 0
+    for filing in filings:
+        acc = filing["accession"]
+        if not acc:
+            continue
+        exists = conn.execute(
+            "SELECT 1 FROM edgar_filings WHERE accession=?", (acc,)
+        ).fetchone()
+        if exists:
+            continue
+
+        # Neue Filing — parsen
+        details = {}
+        if filing["form"] in ("4", "4/A") and filing["document"].endswith(".xml"):
+            details = parse_form4(acc, filing["document"])
+
+        # In DB speichern
+        conn.execute(
+            "INSERT OR IGNORE INTO edgar_filings VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                acc,
+                filing["form"],
+                filing["date"],
+                details.get("ticker", ""),
+                details.get("issuer", ""),
+                details.get("tx_type", ""),
+                details.get("tx_shares", ""),
+                details.get("tx_price", ""),
+                details.get("tx_date", ""),
+                now_utc().isoformat(),
+            ),
+        )
+        conn.commit()
+
+        send_edgar_alert(filing, details)
+        new_count += 1
+
+    if new_count == 0:
+        print("  EDGAR: Keine neuen Filings")
+
 
 FINANCIAL_RSS_FEEDS = [
     ("Reuters Business", "https://feeds.reuters.com/reuters/businessNews"),
@@ -855,6 +1203,20 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor in max 5 words]"""
     </div>
   </td></tr>
 
+  <!-- TRUMP POSITIONEN -->
+  <tr><td style="background:#ffffff;padding:0 32px;">
+    <div style="border-top:1px solid #e5e5ea;"></div>
+  </td></tr>
+  <tr><td style="background:#ffffff;padding:20px 32px 24px;">
+    <p style="margin:0 0 12px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Trumps bekannte Positionen
+    </p>
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;">
+      {holdings_html_block()}
+    </div>
+  </td></tr>
+
   <!-- FOOTER -->
   <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:20px 32px;
        border-top:1px solid #e5e5ea;">
@@ -1112,6 +1474,7 @@ def main():
             )
             processed += 1
 
+    check_edgar_alerts()
     record_outcomes()
 
     print(f"\n{'═'*62}")
