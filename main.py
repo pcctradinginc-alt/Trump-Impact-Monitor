@@ -955,19 +955,18 @@ def check_edgar_alerts() -> None:
 
 
 FINANCIAL_RSS_FEEDS = [
-    # Reuters hat businessNews Feed eingestellt → neuer Endpoint
-    ("Reuters Business", "https://feeds.reuters.com/reuters/businessNews"),
-    ("Reuters Markets",  "https://feeds.reuters.com/reuters/markets"),          # Backup
-    ("CNBC Markets",     "https://www.cnbc.com/id/10000664/device/rss/rss.html"),
-    ("MarketWatch",      "https://feeds.marketwatch.com/marketwatch/topstories/"),
-    ("Yahoo Finance",    "https://finance.yahoo.com/rss/topstories"),
-    # AP Business Feed-URL hat sich geändert
-    ("AP Business",      "https://feeds.apnews.com/rss/apf-business"),          # neuer Endpoint
-    ("AP Markets",       "https://feeds.apnews.com/rss/apf-markets"),           # Backup
-    # Trump-spezifische Feeds
-    ("Google News Trump", "https://news.google.com/rss/search?q=trump+tariff+trade&hl=en-US&gl=US&ceid=US:en"),
+    # Reuters + AP haben öffentliche RSS-Feeds eingestellt (API-Key nötig) → entfernt
+    # Ersatz: Seeking Alpha + Investopedia + Bloomberg (via Google News Proxy)
+    ("CNBC Markets",        "https://www.cnbc.com/id/10000664/device/rss/rss.html"),
+    ("MarketWatch",         "https://feeds.marketwatch.com/marketwatch/topstories/"),
+    ("Yahoo Finance",       "https://finance.yahoo.com/rss/topstories"),
+    ("Barrons",             "https://www.barrons.com/xml/rss/3_7510.xml"),
+    ("WSJ Markets",         "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"),
+    # Trump-spezifische Google News Feeds
+    ("Google News Trump",         "https://news.google.com/rss/search?q=trump+tariff+trade&hl=en-US&gl=US&ceid=US:en"),
     ("Google News Trump Markets", "https://news.google.com/rss/search?q=trump+stock+market+executive+order&hl=en-US&gl=US&ceid=US:en"),
-    ("Politico Economy",  "https://rss.politico.com/economy.xml"),
+    ("Google News Trump Economy", "https://news.google.com/rss/search?q=trump+economy+sanctions+deal&hl=en-US&gl=US&ceid=US:en"),
+    ("Politico Economy",          "https://rss.politico.com/economy.xml"),
 ]
 
 def _rss_to_dict(entry, source: str) -> dict:
@@ -1999,8 +1998,10 @@ def record_outcomes():
 
     log.info("Backtesting: %d Outcomes zu aktualisieren …", len(rows))
     for event_id, ticker, processed_at, price_alert, price_24h, price_7d in rows:
+        # lru_cache umgehen: direkt yfinance aufrufen mit längerem Backoff
+        fetch_market_data.cache_clear()
+        time.sleep(3)   # yfinance erlaubt ~20 Calls/min — 3s Abstand = sicher
         data = fetch_market_data(ticker)
-        time.sleep(1.5)  # yfinance Rate-Limit: immer pausieren, egal ob Treffer oder nicht
         if not data:
             continue
         current = data.get("price")
