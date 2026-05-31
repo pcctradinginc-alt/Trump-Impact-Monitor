@@ -557,43 +557,137 @@ Konfidenz: [hoch / mittel / niedrig] – [kombiniert aus Erkennungs-Konfidenz un
     else:
         badge = ""
 
+    # ── Analyse-Zeilen als HTML-Tabelle rendern ──────────────────────────────
+    def _render_analysis(text: str) -> str:
+        rows = []
+        for line in text.splitlines():
+            if ":" in line:
+                key, _, val = line.partition(":")
+                rows.append(
+                    f'<tr><td style="padding:8px 12px 8px 0;color:#6e6e73;'
+                    f'font-size:13px;white-space:nowrap;vertical-align:top;'
+                    f'font-weight:500;">{key.strip()}</td>'
+                    f'<td style="padding:8px 0;font-size:13px;color:#1d1d1f;'
+                    f'vertical-align:top;">{val.strip()}</td></tr>'
+                )
+            elif line.strip():
+                rows.append(
+                    f'<tr><td colspan="2" style="padding:6px 0;font-size:13px;'
+                    f'color:#1d1d1f;">{line}</td></tr>'
+                )
+        return f'<table style="border-collapse:collapse;width:100%">{"".join(rows)}</table>'
+
+    analysis_html = _render_analysis(alert_text)
+
     # ── HTML-E-Mail ──────────────────────────────────────────────────────────
-    html_body = f"""
-<html><body style="font-family:monospace;font-size:14px;max-width:700px;margin:auto;">
+    html_body = f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0;padding:0;background:#f5f5f7;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f7;padding:32px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
 
-<h2 style="color:#c0392b;border-bottom:2px solid #c0392b;padding-bottom:6px;">
-  🚨 Trump-Impact Alert – {ticker}
-</h2>
+  <!-- HEADER -->
+  <tr><td style="background:#1d1d1f;border-radius:16px 16px 0 0;padding:28px 32px;">
+    <p style="margin:0 0 4px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Trump Impact Monitor
+    </p>
+    <h1 style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',Helvetica,Arial,sans-serif;
+       font-size:26px;font-weight:700;color:#f5f5f7;letter-spacing:-0.02em;">
+      {ticker}
+    </h1>
+    <p style="margin:8px 0 0 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:13px;color:#6e6e73;">
+      {source} &nbsp;·&nbsp; {published}
+    </p>
+  </td></tr>
 
-{badge}
+  <!-- BADGE (nur bei niedrig/claude) -->
+  {"" if not badge.strip() else f'<tr><td style="background:#ffffff;padding:16px 32px 0;">' + badge + "</td></tr>"}
 
-<pre style="background:#f4f4f4;padding:14px;border-radius:6px;
-            border-left:4px solid #c0392b;white-space:pre-wrap;">{alert_text}</pre>
+  <!-- QUELLTEXT -->
+  <tr><td style="background:#ffffff;padding:24px 32px 16px;">
+    <p style="margin:0 0 10px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Quelltext
+    </p>
+    <div style="background:#f5f5f7;border-radius:10px;padding:16px 18px;">
+      <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+         font-size:14px;line-height:1.6;color:#1d1d1f;white-space:pre-wrap;">{raw_text}</p>
+    </div>
+    <p style="margin:10px 0 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:12px;color:#6e6e73;">
+      <a href="{url}" style="color:#0071e3;text-decoration:none;">Original öffnen ↗</a>
+    </p>
+  </td></tr>
 
-<hr style="border:1px solid #ddd;">
+  <!-- TRENNLINIE -->
+  <tr><td style="background:#ffffff;padding:0 32px;">
+    <div style="border-top:1px solid #e5e5ea;"></div>
+  </td></tr>
 
-<h3 style="color:#2c3e50;">📊 Marktdaten – {ticker}</h3>
-<pre style="background:#eaf4fb;padding:10px;border-radius:6px;">{market_block}</pre>
+  <!-- CLAUDE-ANALYSE -->
+  <tr><td style="background:#ffffff;padding:20px 32px 16px;">
+    <p style="margin:0 0 12px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Claude-Analyse
+    </p>
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;">
+      {analysis_html}
+    </div>
+  </td></tr>
 
-<h3 style="color:#27ae60;">🎯 Turbo-Zertifikat-Empfehlung</h3>
-<pre style="background:#eafaf1;padding:10px;border-radius:6px;">{turbo_block}</pre>
+  <!-- TRENNLINIE -->
+  <tr><td style="background:#ffffff;padding:0 32px;">
+    <div style="border-top:1px solid #e5e5ea;"></div>
+  </td></tr>
 
-<hr style="border:1px solid #ddd;">
+  <!-- MARKTDATEN -->
+  <tr><td style="background:#ffffff;padding:20px 32px 16px;">
+    <p style="margin:0 0 10px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Marktdaten – {ticker}
+    </p>
+    <div style="background:#f5f5f7;border-radius:10px;padding:14px 18px;">
+      <pre style="margin:0;font-family:'SF Mono',Menlo,monospace;font-size:12px;
+           line-height:1.6;color:#1d1d1f;white-space:pre-wrap;">{market_block}</pre>
+    </div>
+  </td></tr>
 
-<p style="font-size:12px;color:#555;">
-  <b>Quelle:</b> {source}<br>
-  <b>Veröffentlicht:</b> {published}<br>
-  <b>FinBERT-Sentiment:</b> {finbert_sent}<br>
-  <b>Original:</b> <a href="{url}">{url}</a>
-</p>
+  <!-- TURBO-EMPFEHLUNG -->
+  <tr><td style="background:#ffffff;padding:0 32px 24px;">
+    <p style="margin:0 0 10px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Turbo-Zertifikat-Empfehlung
+    </p>
+    <div style="background:#f0fdf4;border-radius:10px;padding:14px 18px;border:1px solid #d1fae5;">
+      <pre style="margin:0;font-family:'SF Mono',Menlo,monospace;font-size:12px;
+           line-height:1.6;color:#1d1d1f;white-space:pre-wrap;">{turbo_block}</pre>
+    </div>
+  </td></tr>
 
-<p style="font-size:10px;color:#aaa;">
-  Generiert {now_utc().strftime('%Y-%m-%d %H:%M:%S UTC')}
-  · Zeitfenster: letzte {LOOKBACK_HOURS}h
-  · Modell: {MODEL}
-</p>
+  <!-- FOOTER -->
+  <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:20px 32px;
+       border-top:1px solid #e5e5ea;">
+    <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:11px;color:#6e6e73;line-height:1.6;">
+      FinBERT-Sentiment: {finbert_sent} &nbsp;·&nbsp;
+      Modell: {MODEL} &nbsp;·&nbsp;
+      Zeitfenster: letzte {LOOKBACK_HOURS}h<br>
+      Generiert: {now_utc().strftime('%Y-%m-%d %H:%M UTC')}
+    </p>
+  </td></tr>
 
-</body></html>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
 """
     conf_tag = {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
     subject  = f"🚨 Trump-Impact Alert – {ticker}{conf_tag} [{direction}] – {source}"
