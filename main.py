@@ -1357,7 +1357,7 @@ def discover_tickers_via_claude(text: str) -> list[tuple[str, str]]:
     )
     try:
         resp = client.messages.create(
-            model=MODEL,
+            model="claude-haiku-4-5-20251001",  # Ticker-Erkennung braucht kein Sonnet
             max_tokens=30,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
