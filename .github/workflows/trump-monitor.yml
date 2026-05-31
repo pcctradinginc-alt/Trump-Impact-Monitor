@@ -14,7 +14,7 @@ env:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────
@@ -30,11 +30,20 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      # ── 3. Dependencies ────────────────────────────────────────────
+      # ── 3. HuggingFace Model Cache (FinBERT ~400 MB) ───────────────
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: finbert-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            finbert-${{ runner.os }}-
+
+      # ── 4. Dependencies ────────────────────────────────────────────
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # ── 4. Run monitor ─────────────────────────────────────────────
+      # ── 5. Run monitor ─────────────────────────────────────────────
       - name: Run Trump Impact Monitor
         env:
           ANTHROPIC_API_KEY:       ${{ secrets.ANTHROPIC_API_KEY }}
@@ -42,6 +51,7 @@ jobs:
           GMAIL_EMAIL:             ${{ secrets.GMAIL_EMAIL }}
           GMAIL_APP_PASSWORD:      ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL:         ${{ secrets.RECIPIENT_EMAIL }}
+          HF_HUB_DISABLE_PROGRESS_BARS: "1"
         run: python -u main.py
 
       # ── 5. Commit updated SQLite DB back to repo ───────────────────

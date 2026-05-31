@@ -150,7 +150,7 @@ def clean_text(text: str) -> str:
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
-CUTOFF: datetime = now_utc() - timedelta(hours=LOOKBACK_HOURS)
+CUTOFF: datetime  # set in main() at runtime
 
 def is_recent(ts) -> bool:
     if ts is None:
@@ -175,6 +175,10 @@ def is_recent(ts) -> bool:
 
 def get_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def event_hash(ticker: str, text: str) -> str:
+    """Kanonisch: 'TICKER|text' — einheitliche Reihenfolge verhindert Dedup-Bug."""
+    return hashlib.sha256(f"{ticker.upper()}|{text}".encode("utf-8")).hexdigest()
 
 def already_seen(h: str) -> bool:
     return conn.execute("SELECT 1 FROM events WHERE hash=?", (h,)).fetchone() is not None
@@ -532,16 +536,16 @@ Konfidenz: [hoch / mittel / niedrig] – [kombiniert aus Erkennungs-Konfidenz un
     turbo_block = turbo_recommendation(ticker, direction)
 
     # ── SQLite-Dedup ─────────────────────────────────────────────────────────
-    event_id = get_hash(ticker + raw_text)
-    h        = get_hash(raw_text + ticker)
+    h = event_hash(ticker, raw_text)
     try:
         conn.execute(
             "INSERT INTO events VALUES (?,?,?,?,?,?,?)",
-            (event_id, source, str(published), raw_text, h, ticker, now_utc().isoformat()),
+            (h, source, str(published), raw_text, h, ticker, now_utc().isoformat()),
         )
         conn.commit()
     except sqlite3.IntegrityError:
-        pass   # bereits in DB, trotzdem E-Mail schicken (Race-Condition-Schutz)
+        print(f"  ⏭️  {ticker} bereits in DB – kein doppelter Alert")
+        return
 
     # ── Konfidenz-Badge ──────────────────────────────────────────────────────
     if confidence == "niedrig":
@@ -698,6 +702,9 @@ Konfidenz: [hoch / mittel / niedrig] – [kombiniert aus Erkennungs-Konfidenz un
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
+    global CUTOFF
+    CUTOFF = now_utc() - timedelta(hours=LOOKBACK_HOURS)
+
     print(f"\n{'═'*62}")
     print(f"  Trump-Impact Monitor  –  {now_utc().strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print(f"  Zeitfenster: ab {CUTOFF.strftime('%Y-%m-%d %H:%M UTC')}  (letzte {LOOKBACK_HOURS}h)")
@@ -741,7 +748,7 @@ def main():
         for ticker, confidence in _sorted_tickers(tickers):
             if _cap_reached():
                 break
-            if already_seen(get_hash(text + ticker)):
+            if already_seen(event_hash(ticker, text)):
                 continue
             analyze_and_alert("Truth Social", ts, text, ticker, post_url, confidence)
             processed += 1
@@ -773,7 +780,7 @@ def main():
         for ticker, confidence in _sorted_tickers(tickers):
             if _cap_reached():
                 break
-            if already_seen(get_hash(text + ticker)):
+            if already_seen(event_hash(ticker, text)):
                 continue
             analyze_and_alert(
                 article.get("_source", "RSS"),
@@ -804,7 +811,7 @@ def main():
         for ticker, confidence in _sorted_tickers(tickers):
             if _cap_reached():
                 break
-            if already_seen(get_hash(text + ticker)):
+            if already_seen(event_hash(ticker, text)):
                 continue
             analyze_and_alert(
                 "White House",
