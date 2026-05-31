@@ -117,7 +117,98 @@ conn.execute("""
         alerted_at   TEXT
     )
 """)
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS rate_limit (
+        key        TEXT PRIMARY KEY,
+        count      INTEGER DEFAULT 0,
+        window_start TEXT
+    )
+""")
 conn.commit()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RATE LIMITING  –  tägliches Sonnet-Budget + per-Ticker-Cooldown
+# ─────────────────────────────────────────────────────────────────────────────
+DAILY_SONNET_CAP    = 40   # max. Sonnet-Calls pro UTC-Tag
+TICKER_COOLDOWN_H   = 4    # gleicher Ticker nicht öfter als alle 4h
+
+def _rate_limit_ok(ticker: str) -> bool:
+    """
+    Prüft zwei Limits:
+    1. Tägliches Sonnet-Budget (DAILY_SONNET_CAP)
+    2. Per-Ticker-Cooldown (TICKER_COOLDOWN_H)
+    Gibt False zurück wenn eines überschritten ist.
+    """
+    today = now_utc().strftime("%Y-%m-%d")
+
+    # — Tagesbudget ───────────────────────────────────────────────────────────
+    row = conn.execute(
+        "SELECT count, window_start FROM rate_limit WHERE key='daily_sonnet'"
+    ).fetchone()
+    if row:
+        count, window_start = row
+        if window_start == today and count >= DAILY_SONNET_CAP:
+            log.warning(
+                "🚦 Tages-Cap erreicht (%d/%d Sonnet-Calls) – kein weiterer Alert heute",
+                count, DAILY_SONNET_CAP,
+            )
+            return False
+        if window_start != today:
+            # Neuer Tag → Zähler zurücksetzen
+            conn.execute(
+                "UPDATE rate_limit SET count=0, window_start=? WHERE key='daily_sonnet'",
+                (today,),
+            )
+    else:
+        conn.execute(
+            "INSERT INTO rate_limit VALUES ('daily_sonnet', 0, ?)", (today,)
+        )
+
+    # — Ticker-Cooldown ───────────────────────────────────────────────────────
+    cooldown_key = f"ticker_{ticker.upper()}"
+    row = conn.execute(
+        "SELECT count, window_start FROM rate_limit WHERE key=?", (cooldown_key,)
+    ).fetchone()
+    if row:
+        _, last_alert_ts = row
+        try:
+            last_dt = datetime.fromisoformat(last_alert_ts)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            elapsed_h = (now_utc() - last_dt).total_seconds() / 3600
+            if elapsed_h < TICKER_COOLDOWN_H:
+                log.info(
+                    "  ⏳ %s Cooldown: letzter Alert vor %.1fh (min. %dh) → übersprungen",
+                    ticker, elapsed_h, TICKER_COOLDOWN_H,
+                )
+                return False
+        except Exception:
+            pass
+
+    conn.commit()
+    return True
+
+
+def _rate_limit_record(ticker: str) -> None:
+    """Zählt einen verbrauchten Sonnet-Call und aktualisiert den Ticker-Timestamp."""
+    today = now_utc().strftime("%Y-%m-%d")
+    now_iso = now_utc().isoformat()
+
+    conn.execute("""
+        INSERT INTO rate_limit (key, count, window_start) VALUES ('daily_sonnet', 1, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            count        = CASE WHEN window_start = excluded.window_start
+                                THEN count + 1 ELSE 1 END,
+            window_start = excluded.window_start
+    """, (today,))
+
+    cooldown_key = f"ticker_{ticker.upper()}"
+    conn.execute("""
+        INSERT INTO rate_limit (key, count, window_start) VALUES (?, 1, ?)
+        ON CONFLICT(key) DO UPDATE SET count=1, window_start=excluded.window_start
+    """, (cooldown_key, now_iso))
+
+    conn.commit()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ANTHROPIC CLIENT  (einmalig instanziieren)
@@ -864,11 +955,15 @@ def check_edgar_alerts() -> None:
 
 
 FINANCIAL_RSS_FEEDS = [
+    # Reuters hat businessNews Feed eingestellt → neuer Endpoint
     ("Reuters Business", "https://feeds.reuters.com/reuters/businessNews"),
+    ("Reuters Markets",  "https://feeds.reuters.com/reuters/markets"),          # Backup
     ("CNBC Markets",     "https://www.cnbc.com/id/10000664/device/rss/rss.html"),
     ("MarketWatch",      "https://feeds.marketwatch.com/marketwatch/topstories/"),
     ("Yahoo Finance",    "https://finance.yahoo.com/rss/topstories"),
-    ("AP Business",      "https://feeds.apnews.com/apnews/businessnews"),
+    # AP Business Feed-URL hat sich geändert
+    ("AP Business",      "https://feeds.apnews.com/rss/apf-business"),          # neuer Endpoint
+    ("AP Markets",       "https://feeds.apnews.com/rss/apf-markets"),           # Backup
     # Trump-spezifische Feeds
     ("Google News Trump", "https://news.google.com/rss/search?q=trump+tariff+trade&hl=en-US&gl=US&ceid=US:en"),
     ("Google News Trump Markets", "https://news.google.com/rss/search?q=trump+stock+market+executive+order&hl=en-US&gl=US&ceid=US:en"),
@@ -1320,50 +1415,143 @@ def format_market_block(ticker: str) -> str:
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TURBO-ZERTIFIKAT-EMPFEHLUNG
+# TURBO-ZERTIFIKAT-EMPFEHLUNG  –  onvista-basiert
 # ─────────────────────────────────────────────────────────────────────────────
-def parse_trade_direction(alert_text: str) -> str:
-    """Extrahiert LONG / SHORT / UNKLAR aus dem Claude-Output."""
-    for line in alert_text.splitlines():
-        if "trade-richtung:" in line.lower():
-            upper = line.upper()
-            if "LONG"  in upper: return "LONG"
-            if "SHORT" in upper: return "SHORT"
-    return "UNKLAR"
+# Puffer-Zonen je Risikobereitschaft (KO-Abstand zum aktuellen Kurs)
+_TURBO_PROFILES = {
+    "konservativ": {"puffer": 0.20, "hebel_min": 5,  "hebel_max": 9},
+    "mittel":      {"puffer": 0.16, "hebel_min": 8,  "hebel_max": 14},
+    "aggressiv":   {"puffer": 0.13, "hebel_min": 12, "hebel_max": 18},
+}
+TURBO_RISIKO = "mittel"   # global konfigurierbar
+
+
+def _onvista_url(ticker: str, direction: str) -> str:
+    """
+    Erzeugt einen direkten onvista Knock-Out-Finder-Link.
+    onvista kennt US-Tickers nicht direkt — wir landen auf der Suchergebnisseite.
+    """
+    richtung = "call" if direction == "LONG" else "put"
+    # Direkt-URL zum Knock-Out-Finder mit Suchbegriff
+    return (
+        f"https://www.onvista.de/derivate/Knock-Outs"
+        f"?TYPE=KNOCK_OUT&UNDERLYING_SEARCH={ticker}"
+        f"&OPTION_TYPE={richtung.upper()}"
+        f"&ISSUER=Vontobel,SG,HSBC,BNP"
+    )
+
+
+def _calc_atm_iv(ticker: str) -> float | None:
+    """
+    Schätzt implizite Volatilität aus 30-Tage historischer Volatilität (yfinance).
+    Gibt None zurück wenn nicht berechenbar.
+    """
+    try:
+        hist = yf.Ticker(YF_TICKER_MAP.get(ticker.upper(), ticker.upper())).history(
+            period="2mo", auto_adjust=True, timeout=15
+        )
+        if len(hist) < 22:
+            return None
+        returns = hist["Close"].pct_change().dropna()
+        hv30 = float(returns.tail(22).std() * (252 ** 0.5))  # annualisiert
+        return round(hv30, 4)
+    except Exception:
+        return None
+
 
 def turbo_recommendation(ticker: str, direction: str) -> str:
     """
-    Gibt eine skalierbar handelbare Turbo-Empfehlung aus.
-    Kriterien: KO-Abstand > 12%, Spread < 0.5% (muss live geprüft werden).
+    Berechnet optimale Turbo-Parameter basierend auf:
+    - Aktuellem Kurs (yfinance)
+    - Historischer Volatilität (30T HV als IV-Proxy)
+    - Risikobereitschaft (TURBO_RISIKO)
+
+    Kriterien für News-Trade nach Trump-Post:
+    - KO-Abstand: 13–23 % (Puffer gegen Gap-Risiko)
+    - Hebel: 7–16x
+    - Spread: < 0.8 % (manuell auf onvista prüfen)
+    - Emittenten: Vontobel, SG, HSBC, BNP
+    - Typ: Open End Turbo (keine Laufzeit)
+    - Preis: 4–25 € (praktisch handelbar)
     """
     if direction == "UNKLAR":
         return "⛔ Keine Empfehlung – Trade-Richtung unklar"
+
     data = fetch_market_data(ticker)
     if not data:
         return "⛔ Keine Empfehlung – Marktdaten nicht verfügbar"
 
-    price = data["price"]
+    price  = data["price"]
+    prof   = _TURBO_PROFILES[TURBO_RISIKO]
+    hv     = _calc_atm_iv(ticker)
+
+    # Puffer dynamisch: bei hoher Volatilität größerer KO-Abstand
+    puffer = prof["puffer"]
+    if hv is not None and hv > 0.45:   # >45 % annualisierte Vol → konservativer
+        puffer = min(puffer + 0.04, 0.25)
+    elif hv is not None and hv < 0.20: # <20 % Vol → etwas aggressiver okay
+        puffer = max(puffer - 0.02, 0.13)
+
+    onvista_url = _onvista_url(ticker, direction)
 
     if direction == "LONG":
-        ko      = round(price * 0.88, 2)          # 12 % unterhalb
-        lever   = round(price / (price - ko), 1)
+        ko       = round(price * (1 - puffer), 2)
+        abstand  = round(puffer * 100, 1)
+        hebel_lo = prof["hebel_min"]
+        hebel_hi = prof["hebel_max"]
+        approx_lever = round(price / (price - ko), 1)
+        hv_info  = f"{hv*100:.1f}% (30T HV)" if hv else "k.A."
         return (
-            f"📈 LONG-Turbo auf {ticker}\n"
-            f"   Aktueller Kurs:   {price:.2f} USD\n"
-            f"   Empf. KO-Level:  ≤ {ko:.2f} USD  (>12 % Abstand)\n"
-            f"   Hebel (approx):  ~{lever}x\n"
-            f"   ⚠️  Spread vor Kauf prüfen: < 0.5 % erforderlich"
+            f"📈 LONG Open End Turbo auf {ticker}\n"
+            f"\n"
+            f"   Kurs aktuell:      {price:.2f} USD\n"
+            f"   Volatilität:       {hv_info}\n"
+            f"   ──────────────────────────────────\n"
+            f"   Empf. KO-Bereich:  ≤ {ko:.2f} USD  ({abstand}% Abstand)\n"
+            f"   Hebel-Ziel:        {hebel_lo}–{hebel_hi}x  (approx. ~{approx_lever}x)\n"
+            f"   ──────────────────────────────────\n"
+            f"   Emittenten:        Vontobel · SG · HSBC · BNP\n"
+            f"   Max. Spread:       < 0.8 %\n"
+            f"   Preis-Ziel:        4–25 €\n"
+            f"   Typ:               Open End (keine Laufzeit)\n"
+            f"\n"
+            f"   🔍 onvista Finder:\n"
+            f"   {onvista_url}"
         )
-    else:   # SHORT
-        ko      = round(price * 1.12, 2)          # 12 % oberhalb
-        lever   = round(price / (ko - price), 1)
+    else:  # SHORT
+        ko       = round(price * (1 + puffer), 2)
+        abstand  = round(puffer * 100, 1)
+        hebel_lo = prof["hebel_min"]
+        hebel_hi = prof["hebel_max"]
+        approx_lever = round(price / (ko - price), 1)
+        hv_info  = f"{hv*100:.1f}% (30T HV)" if hv else "k.A."
         return (
-            f"📉 SHORT-Turbo auf {ticker}\n"
-            f"   Aktueller Kurs:   {price:.2f} USD\n"
-            f"   Empf. KO-Level:  ≥ {ko:.2f} USD  (>12 % Abstand)\n"
-            f"   Hebel (approx):  ~{lever}x\n"
-            f"   ⚠️  Spread vor Kauf prüfen: < 0.5 % erforderlich"
+            f"📉 SHORT Open End Turbo auf {ticker}\n"
+            f"\n"
+            f"   Kurs aktuell:      {price:.2f} USD\n"
+            f"   Volatilität:       {hv_info}\n"
+            f"   ──────────────────────────────────\n"
+            f"   Empf. KO-Bereich:  ≥ {ko:.2f} USD  ({abstand}% Abstand)\n"
+            f"   Hebel-Ziel:        {hebel_lo}–{hebel_hi}x  (approx. ~{approx_lever}x)\n"
+            f"   ──────────────────────────────────\n"
+            f"   Emittenten:        Vontobel · SG · HSBC · BNP\n"
+            f"   Max. Spread:       < 0.8 %\n"
+            f"   Preis-Ziel:        4–25 €\n"
+            f"   Typ:               Open End (keine Laufzeit)\n"
+            f"\n"
+            f"   🔍 onvista Finder:\n"
+            f"   {onvista_url}"
         )
+
+
+def parse_trade_direction(alert_text: str) -> str:
+    """Extrahiert LONG / SHORT / UNKLAR aus dem Claude-Output."""
+    for line in alert_text.splitlines():
+        if "trade-richtung:" in line.lower() or "trade_direction:" in line.lower():
+            upper = line.upper()
+            if "LONG"  in upper: return "LONG"
+            if "SHORT" in upper: return "SHORT"
+    return "UNKLAR"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CLAUDE SEKTOR-ERKENNUNG  (Truth Social ohne direkten Ticker-Match)
@@ -1479,6 +1667,10 @@ def analyze_and_alert(
     market_block = format_market_block(ticker)
     holding_info = trump_holding_info(ticker)
 
+    # ── Rate-Limit-Check (vor jedem Sonnet-Call) ─────────────────────────────
+    if not _rate_limit_ok(ticker):
+        return
+
     # ── Stufe 1: Haiku-Tradability-Screen (nur Medium/Low/Unknown) ───────────
     if priority != "high" and not _haiku_tradeable(ticker, raw_text, finbert_sent):
         return  # High-Priority-Ticker überspringen diesen Screen
@@ -1555,6 +1747,7 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
             }],
         )
         alert_text = response.content[0].text.strip()
+        _rate_limit_record(ticker)   # Sonnet-Call zählen + Cooldown setzen
     except Exception as e:
         log.error(f"  ❌ Claude-API Fehler ({ticker}): {e}")
         return
@@ -1732,7 +1925,10 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
     </p>
     <div style="background:#f0fdf4;border-radius:10px;padding:14px 18px;border:1px solid #d1fae5;">
       <pre style="margin:0;font-family:'SF Mono',Menlo,monospace;font-size:12px;
-           line-height:1.6;color:#1d1d1f;white-space:pre-wrap;">{turbo_block}</pre>
+           line-height:1.6;color:#1d1d1f;white-space:pre-wrap;">{turbo_block.replace(
+               _onvista_url(ticker, turbo_dir),
+               f'<a href="{_onvista_url(ticker, turbo_dir)}" style="color:#0071e3;">onvista Knock-Out-Finder öffnen ↗</a>'
+           )}</pre>
     </div>
   </td></tr>
 
@@ -1803,9 +1999,9 @@ def record_outcomes():
 
     log.info("Backtesting: %d Outcomes zu aktualisieren …", len(rows))
     for event_id, ticker, processed_at, price_alert, price_24h, price_7d in rows:
-        data = fetch_market_data(ticker)  # gecachte Version — kein Rate-Limit-Spam
+        data = fetch_market_data(ticker)
+        time.sleep(1.5)  # yfinance Rate-Limit: immer pausieren, egal ob Treffer oder nicht
         if not data:
-            time.sleep(1)  # kurze Pause bei leerem Result (Rate-Limit-Schutz)
             continue
         current = data.get("price")
 
