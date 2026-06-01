@@ -124,6 +124,18 @@ conn.execute("""
         window_start TEXT
     )
 """)
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS trump_holdings (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker      TEXT,
+        asset_name  TEXT,
+        tx_type     TEXT,
+        amount      TEXT,
+        tx_date     TEXT,
+        pdf_url     TEXT,
+        created_at  TEXT
+    )
+""")
 conn.commit()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1170,10 +1182,59 @@ def parse_oge_ptr_pdf(pdf_url: str) -> list[dict]:
                                 "tx_type":  "?",
                                 "row_text": line,
                             })
+        _save_oge_holdings(transactions, pdf_url)
         return transactions
     except Exception as e:
         log.warning(f"  ⚠️  OGE PDF Parse Fehler ({pdf_url}): {e}")
         return []
+
+
+# Ticker-Mapping für häufige Asset-Namen in OGE-PDFs
+_OGE_ASSET_TICKER_MAP = {
+    "apple": "AAPL", "microsoft": "MSFT", "amazon": "AMZN", "alphabet": "GOOGL",
+    "google": "GOOGL", "meta": "META", "nvidia": "NVDA", "tesla": "TSLA",
+    "ibm": "IBM", "intel": "INTC", "amd": "AMD", "boeing": "BA",
+    "lockheed": "LMT", "exxon": "XOM", "jpmorgan": "JPM", "goldman": "GS",
+    "bank of america": "BAC", "costco": "COST", "walmart": "WMT",
+    "pfizer": "PFE", "johnson": "JNJ", "berkshire": "BRK",
+    "palantir": "PLTR", "trump media": "DJT",
+}
+
+def _ticker_from_asset_name(name: str) -> str | None:
+    low = name.lower()
+    # Direktes Ticker-Symbol (2-5 Großbuchstaben in Klammern oder am Ende)
+    m = re.search(r'\b([A-Z]{2,5})\b', name)
+    if m and m.group(1) not in {"THE", "AND", "FOR", "LLC", "INC", "CORP"}:
+        return m.group(1)
+    for keyword, ticker in _OGE_ASSET_TICKER_MAP.items():
+        if keyword in low:
+            return ticker
+    return None
+
+def _save_oge_holdings(transactions: list[dict], pdf_url: str) -> None:
+    """Speichert OGE-Transaktionen in trump_holdings-Tabelle."""
+    now = now_utc().isoformat()
+    saved = 0
+    for tx in transactions:
+        ticker = _ticker_from_asset_name(tx.get("asset", ""))
+        if not ticker:
+            continue
+        exists = conn.execute(
+            "SELECT 1 FROM trump_holdings WHERE ticker=? AND pdf_url=? AND tx_type=?",
+            (ticker, pdf_url, tx.get("tx_type", "?")),
+        ).fetchone()
+        if exists:
+            continue
+        conn.execute(
+            "INSERT INTO trump_holdings (ticker,asset_name,tx_type,amount,tx_date,pdf_url,created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (ticker, tx.get("asset",""), tx.get("tx_type","?"),
+             tx.get("amount",""), tx.get("tx_date",""), pdf_url, now),
+        )
+        saved += 1
+    if saved:
+        conn.commit()
+        log.info(f"  💾 OGE Holdings: {saved} Ticker in trump_holdings gespeichert")
 
 
 def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
@@ -1356,15 +1417,26 @@ def check_oge_alerts() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # TRUMP HOLDINGS  (OGE Form 278 – öffentlich)
 # ─────────────────────────────────────────────────────────────────────────────
-TRUMP_HOLDINGS = {
+TRUMP_HOLDINGS_STATIC = {
     "DJT": "JA – Trump hält ~57 % an Trump Media & Technology Group (DJT), Quelle: SEC Form 4 / OGE 2024",
 }
 
 def trump_holding_info(ticker: str) -> str:
-    return TRUMP_HOLDINGS.get(
-        ticker.upper(),
-        "Nicht aus öffentlichen OGE-Filings (Form 278) bekannt – keine Annahmen."
-    )
+    t = ticker.upper()
+    if t in TRUMP_HOLDINGS_STATIC:
+        return TRUMP_HOLDINGS_STATIC[t]
+    rows = conn.execute(
+        "SELECT tx_type, asset_name, tx_date, pdf_url FROM trump_holdings "
+        "WHERE ticker=? ORDER BY created_at DESC LIMIT 5",
+        (t,),
+    ).fetchall()
+    if not rows:
+        return "Nicht aus öffentlichen OGE-Filings (Form 278) bekannt – keine Annahmen."
+    lines = []
+    for tx_type, asset_name, tx_date, pdf_url in rows:
+        date_str = f" am {tx_date}" if tx_date else ""
+        lines.append(f"{tx_type}{date_str} – {asset_name} (OGE PTR: {pdf_url[:60]}…)")
+    return "JA – OGE 278-T PTR: " + " | ".join(lines)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # YAHOO FINANCE  –  Marktdaten
