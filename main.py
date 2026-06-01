@@ -1346,6 +1346,17 @@ def _oge_date_from_url(pdf_url: str) -> str:
     return f"{m.group(1)}-{m.group(2)}-01" if m else ""
 
 
+def reparse_oge_ptr(pdf_url: str) -> None:
+    """
+    Löscht einen bereits gesehenen PTR aus oge_ptrs, sodass er beim
+    nächsten check_oge_alerts()-Lauf neu geparst und in trump_holdings
+    gespeichert wird. Nützlich für PTRs die vor dem Holdings-Fix verarbeitet wurden.
+    """
+    conn.execute("DELETE FROM oge_ptrs WHERE pdf_url=?", (pdf_url,))
+    conn.commit()
+    log.info(f"  ♻️  OGE PTR zum Neuparsen freigegeben: {pdf_url[:80]}")
+
+
 def check_oge_alerts() -> None:
     """
     Prüft auf neue OGE 278-T PDFs.
@@ -1422,21 +1433,42 @@ TRUMP_HOLDINGS_STATIC = {
 }
 
 def trump_holding_info(ticker: str) -> str:
+    """
+    Gibt aktuellen Netto-Bestand zurück.
+    KAUF = +1, VERKAUF = -1, TAUSCH = 0.
+    Wenn alle Käufe durch Verkäufe aufgehoben → 'nicht mehr gehalten'.
+    """
     t = ticker.upper()
     if t in TRUMP_HOLDINGS_STATIC:
         return TRUMP_HOLDINGS_STATIC[t]
+
     rows = conn.execute(
         "SELECT tx_type, asset_name, tx_date, pdf_url FROM trump_holdings "
-        "WHERE ticker=? ORDER BY created_at DESC LIMIT 5",
+        "WHERE ticker=? ORDER BY tx_date ASC, created_at ASC",
         (t,),
     ).fetchall()
     if not rows:
         return "Nicht aus öffentlichen OGE-Filings (Form 278) bekannt – keine Annahmen."
-    lines = []
-    for tx_type, asset_name, tx_date, pdf_url in rows:
-        date_str = f" am {tx_date}" if tx_date else ""
-        lines.append(f"{tx_type}{date_str} – {asset_name} (OGE PTR: {pdf_url[:60]}…)")
-    return "JA – OGE 278-T PTR: " + " | ".join(lines)
+
+    net = 0
+    last_asset = rows[-1][1]
+    last_date  = rows[-1][2]
+    last_pdf   = rows[-1][3]
+    for tx_type, *_ in rows:
+        if tx_type == "KAUF":    net += 1
+        elif tx_type == "VERKAUF": net -= 1
+
+    if net <= 0:
+        return (
+            f"NEIN – laut OGE 278-T PTR vollständig verkauft "
+            f"(letzter Eintrag: {last_date}, {last_asset})"
+        )
+    buys  = sum(1 for r in rows if r[0] == "KAUF")
+    sells = sum(1 for r in rows if r[0] == "VERKAUF")
+    return (
+        f"JA – OGE 278-T PTR: {buys}× KAUF, {sells}× VERKAUF → aktuell gehalten "
+        f"(letzter Eintrag: {last_date}, Quelle: {last_pdf[:60]}…)"
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # YAHOO FINANCE  –  Marktdaten
