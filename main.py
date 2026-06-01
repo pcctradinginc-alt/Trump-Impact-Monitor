@@ -1800,29 +1800,23 @@ def check_oge_alerts() -> None:
         log.info("OGE: Keine PTR-Links gefunden")
         return
 
-    cutoff = (now_utc() - timedelta(days=OGE_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    alert_cutoff = (now_utc() - timedelta(days=OGE_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
     new_count = 0
 
     for item in links:
-        pdf_url = item["pdf_url"]
-        source  = item["source"]
-
-        # Datum-Filter: historische PDFs in DB speichern ohne Alert
+        pdf_url  = item["pdf_url"]
+        source   = item["source"]
         pdf_date = _oge_date_from_url(pdf_url)
-        if pdf_date and pdf_date < cutoff:
-            conn.execute(
-                "INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
-                (pdf_url, source, -1, "HISTORICAL-NO-ALERT"),
-            )
-            continue
+        send_alert = not (pdf_date and pdf_date < alert_cutoff)  # kein Alert für alte PDFs
 
         exists = conn.execute(
             "SELECT 1 FROM oge_ptrs WHERE pdf_url=?", (pdf_url,)
         ).fetchone()
         if exists:
-            continue
+            continue  # bereits verarbeitet
 
-        log.info("Neues OGE PDF: %s…", pdf_url[:80])
+        log.info("Neues OGE PDF%s: %s…",
+                 "" if send_alert else " (historisch, kein Alert)", pdf_url[:80])
 
         # 278e (jährliche Disclosure) vs. 278-T (Periodic Transaction Report)
         if _is_278e_pdf(pdf_url):
@@ -1834,11 +1828,11 @@ def check_oge_alerts() -> None:
                 (pdf_url, source, n, now_utc().isoformat()),
             )
             conn.commit()
-            if n:
+            if n and send_alert:
                 new_count += 1
             continue
 
-        # PTR: zuerst pdfplumber versuchen, bei 0 Ergebnissen Claude Vision
+        # PTR: immer parsen (für Holdings-DB), Alert nur wenn aktuell
         transactions = parse_oge_ptr_pdf(pdf_url)
         if not transactions:
             log.info("  → pdfplumber leer, versuche Claude Vision…")
@@ -1854,8 +1848,11 @@ def check_oge_alerts() -> None:
             log.warning("OGE PTR: 0 Transaktionen auch nach Vision — übersprungen: %s", pdf_url)
             continue
 
-        send_oge_alert(pdf_url, source, transactions)
-        new_count += 1
+        if send_alert:
+            send_oge_alert(pdf_url, source, transactions)
+            new_count += 1
+        else:
+            log.info("  📥 Historischer PTR geparst (%d Tx) — kein Alert", len(transactions))
 
     conn.commit()
     if new_count == 0:
