@@ -1442,94 +1442,186 @@ def _save_oge_holdings(transactions: list[dict], pdf_url: str) -> None:
 
 
 def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
-    """Sendet E-Mail-Alert für neuen OGE 278-T Periodic Transaction Report."""
-    tx_rows = ""
-    for tx in transactions[:20]:  # max 20 Zeilen
-        color = "#d1fae5" if tx["tx_type"] == "KAUF" else \
-                "#fee2e2" if tx["tx_type"] == "VERKAUF" else "#f5f5f7"
-        emoji = "📈" if tx["tx_type"] == "KAUF" else \
-                "📉" if tx["tx_type"] == "VERKAUF" else "🔄"
-        tx_rows += (
-            f'<tr style="background:{color};">'
-            f'<td style="padding:8px 12px;font-size:13px;color:#1d1d1f;">'
-            f'{emoji} {tx["asset"]}</td>'
-            f'<td style="padding:8px 12px;font-size:13px;font-weight:600;color:#1d1d1f;">'
-            f'{tx["tx_type"]}</td>'
-            f'<td style="padding:8px 12px;font-size:11px;color:#6e6e73;">'
-            f'{tx["row_text"][:120]}</td>'
-            f'</tr>'
+    """
+    Sendet PTR-Alert mit Portfolio-Kontext:
+    Jede Transaktion wird gegen 278e-Snapshot und bestehende trump_holdings verglichen
+    um NEW BUY / ADD / SELL / SOLD OUT zu bestimmen.
+    """
+    # Aktueller 278e-Snapshot als Basis
+    snap_year = conn.execute(
+        "SELECT MAX(year) FROM trump_278e_snapshot"
+    ).fetchone()[0]
+    snap_map = {}  # ticker → value_range
+    if snap_year:
+        for ticker, val in conn.execute(
+            "SELECT ticker, value_range FROM trump_278e_snapshot WHERE year=? AND ticker IS NOT NULL",
+            (snap_year,)
+        ).fetchall():
+            if ticker:
+                snap_map[ticker.upper()] = val
+
+    # Bisherige trump_holdings (alle PTRs vor diesem)
+    prev_holdings = {}  # ticker → net (KAUF=+1, VERKAUF=-1)
+    for ticker, tx_type in conn.execute(
+        "SELECT ticker, tx_type FROM trump_holdings WHERE pdf_url!=? AND ticker IS NOT NULL",
+        (pdf_url,)
+    ).fetchall():
+        if ticker:
+            t = ticker.upper()
+            prev_holdings[t] = prev_holdings.get(t, 0) + (
+                1 if tx_type == "KAUF" else -1 if tx_type == "VERKAUF" else 0)
+
+    def _context_badge(ticker, tx_type):
+        """Bestimmt Badge basierend auf Portfolio-Kontext."""
+        t = (ticker or "").upper()
+        in_278e    = t in snap_map
+        prev_net   = prev_holdings.get(t, 0)
+        currently_held = in_278e or prev_net > 0
+
+        if tx_type == "KAUF":
+            if not currently_held:
+                return "NEW BUY", "#d1fae5", "#059669"
+            return "ADD", "#dbeafe", "#2563eb"
+        if tx_type == "VERKAUF":
+            # Netto nach diesem Verkauf
+            all_buys  = conn.execute(
+                "SELECT COUNT(*) FROM trump_holdings WHERE ticker=? AND tx_type='KAUF'", (t,)
+            ).fetchone()[0]
+            all_sells = conn.execute(
+                "SELECT COUNT(*) FROM trump_holdings WHERE ticker=? AND tx_type='VERKAUF'", (t,)
+            ).fetchone()[0]
+            net_after = (all_buys - all_sells)
+            if net_after <= 0 and not in_278e:
+                return "SOLD OUT", "#fee2e2", "#dc2626"
+            return "SELL", "#fef3c7", "#d97706"
+        return "EXCHANGE", "#f5f5f7", "#6e6e73"
+
+    # Transaktionen aufteilen: Aktien vs. Anleihen/Sonstiges
+    stock_txs = []
+    other_txs  = []
+    for tx in transactions:
+        ticker = _ticker_from_asset_name(tx.get("asset", ""))
+        tx["_ticker"] = ticker
+        if ticker:
+            stock_txs.append(tx)
+        else:
+            other_txs.append(tx)
+
+    th = ('style="padding:0 10px 6px 0;font-size:10px;font-weight:600;color:#9ca3af;'
+          'text-align:left;text-transform:uppercase;letter-spacing:0.05em;"')
+
+    def _td(content, color="#1d1d1f", bold=False, small=False):
+        fs = "10px" if small else "11px"
+        fw = "700" if bold else "400"
+        return (f'<td style="padding:5px 10px 5px 0;font-size:{fs};font-weight:{fw};'
+                f'color:{color};vertical-align:top;border-bottom:1px solid #f5f5f7;">'
+                f'{content}</td>')
+
+    # Aktien-Tabelle (mit Kontext-Badges)
+    stock_rows_html = ""
+    n_new_buy = n_add = n_sell = n_sold_out = 0
+    for tx in stock_txs:
+        ticker   = tx["_ticker"]
+        label, bg, fg = _context_badge(ticker, tx.get("tx_type","?"))
+        badge = (f'<span style="background:{bg};color:{fg};font-size:9px;font-weight:700;'
+                 f'padding:2px 5px;border-radius:3px;">{label}</span>')
+        snap_val = snap_map.get((ticker or "").upper(), "–")
+        snap_info = f'278e: {snap_val}' if snap_val != "–" else "nicht in 278e"
+        if label == "NEW BUY":    n_new_buy += 1
+        elif label == "ADD":      n_add += 1
+        elif label == "SELL":     n_sell += 1
+        elif label == "SOLD OUT": n_sold_out += 1
+        stock_rows_html += (
+            f'<tr style="background:{"#fafffe" if label in ("NEW BUY","ADD") else "#fff8f8" if label in ("SELL","SOLD OUT") else "#fff"};">'
+            + _td(ticker or "–", bold=True)
+            + _td(tx.get("asset","")[:45], "#6e6e73")
+            + _td(tx.get("tx_type","?"), fg, bold=True)
+            + _td(tx.get("tx_date","–"), "#6e6e73")
+            + _td(tx.get("amount","–"))
+            + _td(snap_info, "#9ca3af", small=True)
+            + _td(badge)
+            + "</tr>"
         )
 
-    if not tx_rows:
-        tx_rows = (
-            '<tr><td colspan="3" style="padding:12px;font-size:13px;color:#6e6e73;">'
-            'Keine Transaktionszeilen automatisch erkannt — bitte PDF manuell prüfen.'
-            '</td></tr>'
+    if not stock_rows_html:
+        stock_rows_html = ('<tr><td colspan="7" style="padding:10px 0;font-size:11px;color:#9ca3af;">'
+                           'Keine Aktien-Transaktionen in diesem PTR erkannt.</td></tr>')
+
+    # Anleihen-Tabelle (kompakt, ohne Kontext)
+    bond_rows_html = ""
+    for tx in other_txs[:30]:
+        color = "#d1fae5" if tx.get("tx_type") == "KAUF" else \
+                "#fee2e2" if tx.get("tx_type") == "VERKAUF" else "#f5f5f7"
+        bond_rows_html += (
+            f'<tr style="background:{color};">'
+            + _td(tx.get("asset","")[:60], "#6e6e73", small=True)
+            + _td(tx.get("tx_type","?"), "#1d1d1f", bold=True, small=True)
+            + _td(tx.get("tx_date","–"), "#6e6e73", small=True)
+            + _td(tx.get("amount","–"), "#1d1d1f", small=True)
+            + "</tr>"
         )
+    bond_note = f" (erste 30 von {len(other_txs)})" if len(other_txs) > 30 else ""
 
     html_body = f"""<!DOCTYPE html>
-<html lang="de">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<html lang="de"><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#f5f5f7;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f7;padding:32px 0;">
 <tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+<table width="700" cellpadding="0" cellspacing="0" style="max-width:700px;width:100%;">
 
   <tr><td style="background:#1d1d1f;border-radius:16px 16px 0 0;padding:28px 32px;">
-    <p style="margin:0 0 4px 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
-       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+    <p style="margin:0 0 4px;font-family:-apple-system,sans-serif;font-size:11px;
+       font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
       OGE Form 278-T · Periodic Transaction Report
     </p>
-    <h1 style="margin:0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
-       font-size:24px;font-weight:700;color:#f5f5f7;letter-spacing:-0.02em;">
-      🏛️ Neuer Trump-Transaktionsbericht
+    <h1 style="margin:0;font-family:-apple-system,sans-serif;font-size:22px;
+       font-weight:700;color:#f5f5f7;letter-spacing:-0.02em;">
+      Neuer Trump PTR · {now_utc().strftime('%d.%m.%Y')}
     </h1>
-    <p style="margin:8px 0 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
-       font-size:13px;color:#6e6e73;">
-      Quelle: {source} · Entdeckt: {now_utc().strftime('%Y-%m-%d %H:%M UTC')}
+    <p style="margin:6px 0 0;font-family:-apple-system,sans-serif;font-size:12px;color:#6e6e73;">
+      {len(transactions)} Transaktionen gesamt · {len(stock_txs)} Aktien · {len(other_txs)} Anleihen/Sonstiges
     </p>
   </td></tr>
 
-  <tr><td style="background:#ffffff;padding:24px 32px 8px;">
-    <p style="margin:0 0 10px;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
-       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
-      Erkannte Transaktionen ({len(transactions)})
+  <tr><td style="background:#fff;padding:16px 32px 8px;">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+      {''.join(f'<td style="text-align:center;padding:8px 10px;border-radius:8px;background:{bg};">'
+               f'<div style="font-size:18px;font-weight:700;color:{fg};">{n}</div>'
+               f'<div style="font-size:9px;font-weight:700;color:{fg};text-transform:uppercase;">{lbl}</div>'
+               f'</td>'
+               for n, lbl, bg, fg in [
+                   (n_new_buy, "New Buy", "#d1fae5", "#059669"),
+                   (n_add,     "Add",     "#dbeafe", "#2563eb"),
+                   (n_sell,    "Sell",    "#fef3c7", "#d97706"),
+                   (n_sold_out,"Sold Out","#fee2e2", "#dc2626"),
+                   (len(stock_txs), "Aktien", "#f5f5f7", "#1d1d1f"),
+                   (len(other_txs), "Anleihen", "#f5f5f7", "#6e6e73"),
+               ])}
+    </tr></table>
+  </td></tr>
+
+  <tr><td style="background:#fff;padding:8px 32px 24px;">
+    <p style="margin:12px 0 6px;font-size:10px;font-weight:700;color:#6e6e73;
+       text-transform:uppercase;letter-spacing:0.06em;">
+      Aktien · Portfolio-Kontext vs. 278e {snap_year or "–"}
     </p>
-    <table style="border-collapse:collapse;width:100%;border-radius:10px;overflow:hidden;">
-      <thead>
-        <tr style="background:#f5f5f7;">
-          <th style="padding:8px 12px;font-size:11px;color:#6e6e73;text-align:left;">Asset</th>
-          <th style="padding:8px 12px;font-size:11px;color:#6e6e73;text-align:left;">Typ</th>
-          <th style="padding:8px 12px;font-size:11px;color:#6e6e73;text-align:left;">Details</th>
-        </tr>
-      </thead>
-      <tbody>{tx_rows}</tbody>
+    <table style="border-collapse:collapse;width:100%;">
+      <thead><tr>
+        <th {th}>Ticker</th><th {th}>Asset</th><th {th}>Typ</th>
+        <th {th}>Datum</th><th {th}>Betrag</th>
+        <th {th}>278e Basis</th><th {th}>Änderung</th>
+      </tr></thead>
+      <tbody>{stock_rows_html}</tbody>
     </table>
-    <p style="margin:16px 0 0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
-       font-size:13px;">
-      <a href="{pdf_url}" style="color:#0071e3;text-decoration:none;">
-        📄 Original-PDF öffnen ↗
-      </a>
-    </p>
   </td></tr>
 
-  <tr><td style="background:#ffffff;padding:0 32px;">
-    <div style="border-top:1px solid #e5e5ea;margin-top:16px;"></div>
-  </td></tr>
-
-  <tr><td style="background:#ffffff;padding:20px 32px 24px;">
-    <p style="margin:0 0 12px;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
-       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
-      Trumps bekannte Positionen
-    </p>
-    {holdings_html_block()}
-  </td></tr>
+  {'<tr><td style="background:#fff;padding:0 32px 24px;"><p style="margin:0 0 6px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Anleihen &amp; Sonstiges' + bond_note + '</p><table style="border-collapse:collapse;width:100%;"><thead><tr><th ' + th + '>Asset</th><th ' + th + '>Typ</th><th ' + th + '>Datum</th><th ' + th + '>Betrag</th></tr></thead><tbody>' + bond_rows_html + '</tbody></table></td></tr>' if bond_rows_html else ''}
 
   <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:16px 32px;
        border-top:1px solid #e5e5ea;">
-    <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;
-       font-size:11px;color:#6e6e73;">
-      OGE Form 278-T · Automatisch erkannt via {source} ·
+    <p style="margin:0;font-family:-apple-system,sans-serif;font-size:11px;color:#6e6e73;">
+      OGE 278-T · {source} · 278e-Basis: {snap_year or "nicht verfügbar"} ·
+      <a href="{pdf_url}" style="color:#0071e3;text-decoration:none;">PDF ↗</a> ·
       {now_utc().strftime('%Y-%m-%d %H:%M UTC')}
     </p>
   </td></tr>
@@ -1537,9 +1629,12 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
 </table></td></tr></table>
 </body></html>"""
 
-    subject = f"🏛️ OGE 278-T: Neuer Trump-Transaktionsbericht ({len(transactions)} Positionen)"
+    subject = (f"🏛️ Trump PTR: {n_new_buy} NEW BUY · {n_add} ADD · "
+               f"{n_sell} SELL · {n_sold_out} SOLD OUT · "
+               f"{len(transactions)} Tx gesamt")
     send_gmail(subject, html_body)
-    log.info(f"  📨 OGE Alert gesendet: {len(transactions)} Transaktionen | {source}")
+    log.info(f"  📨 PTR Alert: {len(transactions)} Tx · {len(stock_txs)} Aktien · "
+             f"{n_new_buy} NEW, {n_add} ADD, {n_sell} SELL, {n_sold_out} SOLD OUT")
 
 
 OGE_LOOKBACK_DAYS = 90  # Nur PDFs der letzten 90 Tage alertieren (wie EDGAR)
