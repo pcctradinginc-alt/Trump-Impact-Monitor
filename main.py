@@ -1713,6 +1713,7 @@ ANALYSIS FORMAT — respond exactly:
 
 RELEVANCE: [YES / NO] — {ticker} is [directly named / sector-affected / tangentially mentioned]
 COMPANY: [Full legal name] ({ticker})
+EVENT_DATE: [YYYY-MM-DD of when the described event actually occurred, NOT the article publish date — if unknown write UNKNOWN]
 EVENT_SUMMARY: [One sentence: what Trump said/did]
 SENTIMENT: [BULLISH / BEARISH / NEUTRAL] for {ticker}
 SENTIMENT_BASIS: [Quote from text — max 15 words]
@@ -1764,6 +1765,7 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
     direction  = "UNKLAR"
     conf_score = "LOW"
     magnitude  = "SMALL"
+    event_date_str = "UNKNOWN"
     for line in alert_text.splitlines():
         u = line.upper()
         if u.startswith("TRADE_DIRECTION:"):
@@ -1778,6 +1780,24 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
             if "LARGE"  in u: magnitude = "LARGE"
             elif "MEDIUM" in u: magnitude = "MEDIUM"
             else: magnitude = "SMALL"
+        elif line.upper().startswith("EVENT_DATE:"):
+            event_date_str = line.split(":", 1)[1].strip()
+
+    # ── Stale-Event-Gate: kein Trade wenn Event > 7 Tage alt ─────────────────
+    if event_date_str and event_date_str.upper() != "UNKNOWN":
+        try:
+            event_dt = datetime.strptime(event_date_str[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            age_days = (now_utc() - event_dt).days
+            if age_days > 7:
+                log.info(f"  ⏭️  {ticker} Event vom {event_date_str} ist {age_days} Tage alt → NO_TRADE (stale)")
+                alert_text = re.sub(
+                    r"(TRADE_DIRECTION:)[^\n]*",
+                    f"\\1 NO_TRADE  ⚠️ Event {age_days} Tage alt – Markt hat bereits reagiert",
+                    alert_text,
+                )
+                direction = "NO_TRADE"
+        except ValueError:
+            pass
 
     # ── Schwellenwert-Gate (aus config.yml) ───────────────────────────────────
     if not confidence_ok(conf_score):
