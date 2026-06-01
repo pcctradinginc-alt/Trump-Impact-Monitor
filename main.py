@@ -1553,8 +1553,8 @@ def _oge_date_from_url(pdf_url: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # OGE FORM 278e  –  Jährlicher Snapshot via Claude Vision OCR
 # ─────────────────────────────────────────────────────────────────────────────
-_278E_PART6_START = 86   # PDF-Seite wo Part 6 (Other Assets) beginnt
-_278E_PART6_END   = 146  # PDF-Seite wo Part 6 endet (inklusiv)
+_278E_PART6_START = 86   # Fallback-Seite wenn Auto-Detection fehlschlägt
+_278E_PART6_END   = 146  # Fallback-Ende
 
 _278E_EXTRACT_PROMPT = """This is a page from Trump's OGE Form 278e financial disclosure.
 Extract EVERY row from the Part 6 table (Other Assets and Income).
@@ -1591,8 +1591,26 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
     conn.commit()
 
     total_saved = 0
-    pages_to_parse = range(_278E_PART6_START - 1, min(_278E_PART6_END, len(doc)))
-    log.info(f"  📄 278e: Verarbeite {len(pages_to_parse)} Seiten via Claude Vision…")
+    # Auto-Detection Part 6: suche via fitz-Text nach "Part 6" Header,
+    # falle auf Hardcode zurück wenn nicht gefunden (Bild-Scan ohne Text-Layer)
+    part6_start = _278E_PART6_START - 1  # 0-indexed
+    part6_end   = min(_278E_PART6_END, len(doc))
+    for i, page in enumerate(doc):
+        txt = page.get_text().strip()
+        if "Part 6" in txt and "Other Assets" in txt:
+            part6_start = i
+            log.info(f"  📄 278e Auto-Detection: Part 6 beginnt auf Seite {i+1}")
+            break
+        # Auch Bilderseiten: via kleines Thumbnail und Haiku prüfen (nur erste 10 Seiten ab Kandidat)
+    # Part-7-Start = Ende von Part 6
+    for i in range(part6_start + 1, len(doc)):
+        txt = doc[i].get_text().strip()
+        if "Part 7" in txt and len(txt) > 50:
+            part6_end = i
+            log.info(f"  📄 278e Auto-Detection: Part 6 endet auf Seite {i} (Part 7 ab S.{i+1})")
+            break
+    pages_to_parse = range(part6_start, part6_end)
+    log.info(f"  📄 278e: Verarbeite {len(pages_to_parse)} Seiten (S.{part6_start+1}–{part6_end}) via Claude Vision…")
 
     for pg_idx in pages_to_parse:
         try:
