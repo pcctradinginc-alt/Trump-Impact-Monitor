@@ -1556,6 +1556,14 @@ def _oge_date_from_url(pdf_url: str) -> str:
 _278E_PART6_START = 86   # Fallback-Seite wenn Auto-Detection fehlschlägt
 _278E_PART6_END   = 146  # Fallback-Ende
 
+_PTR_EXTRACT_PROMPT = """This is a page from Trump's OGE Form 278-T Periodic Transaction Report.
+Extract EVERY transaction row from the table.
+Return ONLY a JSON array, no other text. Each element:
+{"asset": "full description as written", "type": "Purchase or Sale or Exchange", "date": "MM/DD/YYYY", "amount": "dollar range as written e.g. $1,001 - $15,000"}
+Skip header rows, cover page, signature pages, and blank rows.
+If this page has no transaction table, return [].
+Important: include ALL transactions, even municipal bonds and fixed income."""
+
 _278E_EXTRACT_PROMPT = """This is a page from Trump's OGE Form 278e financial disclosure.
 Extract EVERY row from the Part 6 table (Other Assets and Income).
 Return ONLY a JSON array, no other text. Each element:
@@ -1665,6 +1673,94 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
     return total_saved
 
 
+def parse_ptr_via_claude_vision(pdf_url: str) -> list[dict]:
+    """
+    Parst ein OGE 278-T PTR-PDF via Claude Vision.
+    Gibt Liste von Transaktions-Dicts zurück und speichert Aktien in trump_holdings.
+    """
+    try:
+        import fitz
+    except ImportError:
+        log.warning("pymupdf nicht installiert — PTR Vision-Parsing übersprungen")
+        return []
+
+    try:
+        r = requests.get(pdf_url, headers=OGE_HEADERS, timeout=30)
+        r.raise_for_status()
+        doc = fitz.open(stream=r.content, filetype="pdf")
+    except Exception as e:
+        log.warning(f"  ⚠️  PTR Vision: PDF Download Fehler: {e}")
+        return []
+
+    all_transactions = []
+    now = now_utc().isoformat()
+
+    for pg_idx, page in enumerate(doc):
+        try:
+            pix    = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+            img_b64 = base64.standard_b64encode(pix.tobytes("png")).decode()
+            resp   = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4096,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": "image/png", "data": img_b64
+                    }},
+                    {"type": "text", "text": _PTR_EXTRACT_PROMPT},
+                ]}],
+            )
+            raw = resp.content[0].text.strip()
+            m   = re.search(r'\[.*\]', raw, re.DOTALL)
+            if not m:
+                continue
+            rows = json.loads(m.group(0))
+            if not rows:
+                continue
+
+            for row in rows:
+                asset  = str(row.get("asset", "")).strip()
+                tx_type_raw = str(row.get("type", "")).strip().lower()
+                date   = str(row.get("date", "")).strip()
+                amount = str(row.get("amount", "")).strip()
+                if not asset:
+                    continue
+                tx_type = ("KAUF" if "purchase" in tx_type_raw
+                           else "VERKAUF" if "sale" in tx_type_raw
+                           else "TAUSCH" if "exchange" in tx_type_raw
+                           else "?")
+                tx = {"asset": asset, "tx_type": tx_type,
+                      "tx_date": date, "amount": amount, "row_text": f"{asset} | {tx_type} | {date} | {amount}"}
+                all_transactions.append(tx)
+
+                # Nur Aktien in trump_holdings speichern (keine Anleihen)
+                ticker = _ticker_from_asset_name(asset)
+                if ticker:
+                    exists = conn.execute(
+                        "SELECT 1 FROM trump_holdings WHERE ticker=? AND pdf_url=? AND tx_type=? AND tx_date=?",
+                        (ticker, pdf_url, tx_type, date),
+                    ).fetchone()
+                    if not exists:
+                        conn.execute(
+                            "INSERT INTO trump_holdings (ticker,asset_name,tx_type,amount,tx_date,pdf_url,created_at) "
+                            "VALUES (?,?,?,?,?,?,?)",
+                            (ticker, asset, tx_type, amount, date, pdf_url, now),
+                        )
+            conn.commit()
+            if rows:
+                log.info(f"    PTR S.{pg_idx+1}: {len(rows)} Transaktionen")
+
+        except json.JSONDecodeError:
+            log.warning(f"    PTR S.{pg_idx+1}: JSON-Fehler")
+        except Exception as e:
+            log.warning(f"    PTR S.{pg_idx+1}: {e}")
+
+    stocks_found = conn.execute(
+        "SELECT COUNT(*) FROM trump_holdings WHERE pdf_url=?", (pdf_url,)
+    ).fetchone()[0]
+    log.info(f"  ✅ PTR Vision: {len(all_transactions)} Transaktionen, {stocks_found} Aktien gespeichert")
+    return all_transactions
+
+
 def _is_278e_pdf(pdf_url: str) -> bool:
     """278e-PDF hat keinen 'Periodic-Transaction-Report' im Namen."""
     return "periodic-transaction-report" not in pdf_url.lower()
@@ -1742,7 +1838,11 @@ def check_oge_alerts() -> None:
                 new_count += 1
             continue
 
+        # PTR: zuerst pdfplumber versuchen, bei 0 Ergebnissen Claude Vision
         transactions = parse_oge_ptr_pdf(pdf_url)
+        if not transactions:
+            log.info("  → pdfplumber leer, versuche Claude Vision…")
+            transactions = parse_ptr_via_claude_vision(pdf_url)
 
         conn.execute(
             "INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
@@ -1751,9 +1851,7 @@ def check_oge_alerts() -> None:
         conn.commit()
 
         if not transactions:
-            log.warning(
-                "OGE PDF geparst aber 0 Transaktionen erkannt — kein Alert: %s", pdf_url
-            )
+            log.warning("OGE PTR: 0 Transaktionen auch nach Vision — übersprungen: %s", pdf_url)
             continue
 
         send_oge_alert(pdf_url, source, transactions)
