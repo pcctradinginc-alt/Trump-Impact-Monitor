@@ -80,7 +80,7 @@ if missing:
 # ─────────────────────────────────────────────────────────────────────────────
 # SQLITE  –  Dedup-Datenbank
 # ─────────────────────────────────────────────────────────────────────────────
-conn = sqlite3.connect(DB_PATH)
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.execute("PRAGMA journal_mode=WAL")   # verhindert DB-Korruption bei parallelen Runs
 conn.execute("PRAGMA synchronous=NORMAL") # WAL + NORMAL: schnell und sicher
 conn.execute("""
@@ -1663,13 +1663,14 @@ Skip header rows, cover page, signature pages, and blank rows.
 If this page has no transaction table, return [].
 Important: include ALL transactions, even municipal bonds and fixed income."""
 
-_278E_EXTRACT_PROMPT = """This is a page from Trump's OGE Form 278e financial disclosure.
-Extract EVERY row from the Part 6 table (Other Assets and Income).
-Return ONLY a JSON array, no other text. Each element:
-{"asset": "full name as written", "value": "value range as written", "income_type": "type or empty", "income_amount": "amount or empty"}
-If a row has no value (blank or 'None (or less than $1,001)'), still include it with value as written.
-Skip header rows and the 'INVESTMENT ACCOUNT #4' section header.
-If the page has no Part 6 table data, return []."""
+_278E_EXTRACT_PROMPT = """These are pages from Part 6 (Other Assets and Income) of Trump's OGE Form 278e annual financial disclosure.
+Extract EVERY row from the asset tables visible in these pages.
+The table has columns: # | Description | EIF | Value | Income Type | Income Amount.
+Return ONLY a valid JSON array — no explanation, no markdown, no preamble. Each element:
+{"asset": "full description as written", "value": "value range e.g. $1,001 - $15,000", "income_type": "e.g. DIVIDEND or empty string", "income_amount": "e.g. $201 - $1,000 or empty string"}
+Include ALL rows including those with 'None (or less than $1,001)' as value.
+Skip only the column header row and section dividers like 'INVESTMENT ACCOUNT #4'.
+If no asset rows are visible, return []."""
 
 def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
     """
@@ -1743,13 +1744,11 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
                 content.append({"type": "image", "source": {
                     "type": "base64", "media_type": "image/png", "data": img_b64
                 }})
-            content.append({"type": "text", "text":
-                _278E_EXTRACT_PROMPT +
-                "\nReturn ONE combined JSON array for ALL pages shown above."})
+            content.append({"type": "text", "text": _278E_EXTRACT_PROMPT})
 
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=4096,
+                max_tokens=8192,
                 messages=[{"role": "user", "content": content}],
             )
             raw  = resp.content[0].text.strip()
@@ -1783,7 +1782,10 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
             log.warning(f"    Batch {batch_idx+1}: {e} ({consecutive_errors}/{_VISION_MAX_ERRORS})")
 
     log.info(f"  ✅ 278e: {total_saved} Positionen gespeichert (Jahr {year})")
-    send_278e_alert(pdf_url, year)
+    if total_saved > 0:
+        send_278e_alert(pdf_url, year)
+    else:
+        log.warning("  ⚠️  278e: 0 Positionen geparst — kein Alert verschickt")
     return total_saved
 
 
@@ -2002,13 +2004,11 @@ def parse_ptr_via_claude_vision(pdf_url: str, db_conn=None) -> list[dict]:
                 content.append({"type": "image", "source": {
                     "type": "base64", "media_type": "image/png", "data": img_b64
                 }})
-            content.append({"type": "text", "text":
-                _PTR_EXTRACT_PROMPT +
-                "\nReturn ONE combined JSON array for ALL pages shown above."})
+            content.append({"type": "text", "text": _PTR_EXTRACT_PROMPT})
 
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=4096,
+                max_tokens=8192,
                 messages=[{"role": "user", "content": content}],
             )
             raw  = resp.content[0].text.strip()
