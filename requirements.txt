@@ -4,6 +4,7 @@ feedparser==6.0.11
 anthropic==0.52.0
 yfinance==0.2.54
 curl_cffi>=0.7
+pymupdf>=1.24
 transformers==4.47.1
 torch==2.5.1
 pdfplumber==0.11.4

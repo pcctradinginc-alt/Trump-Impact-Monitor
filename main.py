@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import base64
 import sqlite3
 import hashlib
 import socket
@@ -122,6 +123,19 @@ conn.execute("""
         key        TEXT PRIMARY KEY,
         count      INTEGER DEFAULT 0,
         window_start TEXT
+    )
+""")
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS trump_278e_snapshot (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        year         INTEGER,
+        asset_name   TEXT,
+        ticker       TEXT,
+        value_range  TEXT,
+        income_type  TEXT,
+        income_amount TEXT,
+        pdf_url      TEXT,
+        parsed_at    TEXT
     )
 """)
 conn.execute("""
@@ -650,43 +664,89 @@ TRUMP_KNOWN_HOLDINGS = [
 ]
 
 
-def holdings_html_block() -> str:
-    """Generiert strukturierten HTML-Block aller Trump-Positionen."""
+_VALUE_SORT_KEY = {
+    "Over $50,000,000": 0, "$25,000,001 - $50,000,000": 1,
+    "$5,000,001 - $25,000,000": 2, "$1,000,001 - $5,000,000": 3,
+    "$500,001 - $1,000,000": 4, "$250,001 - $500,000": 5,
+    "$100,001 - $250,000": 6, "$50,001 - $100,000": 7,
+    "$15,001 - $50,000": 8, "$1,001 - $15,000": 9,
+    "$1,001 - $15,000": 9, "None (or less than $1,001)": 10,
+}
 
-    # ── 1. Aktienportfolio aus trump_holdings DB ──────────────────────────────
+def holdings_html_block() -> str:
+    """Generiert strukturierten HTML-Block: 278e Snapshot + PTR Deltas."""
+
+    # ── 278e Snapshot (Basis-Portfolio) ──────────────────────────────────────
     try:
-        db_rows = conn.execute("""
+        snap_year = conn.execute(
+            "SELECT MAX(year) FROM trump_278e_snapshot"
+        ).fetchone()[0]
+        snap_rows = conn.execute("""
+            SELECT asset_name, ticker, value_range, income_type, income_amount
+            FROM trump_278e_snapshot WHERE year=?
+            ORDER BY asset_name
+        """, (snap_year,)).fetchall() if snap_year else []
+    except Exception:
+        snap_rows = []
+        snap_year = None
+
+    # ── PTR Transaktionen (Deltas seit 278e) ─────────────────────────────────
+    try:
+        ptr_rows = conn.execute("""
             SELECT ticker, asset_name,
                    SUM(CASE WHEN tx_type='KAUF'    THEN 1 ELSE 0 END) AS buys,
                    SUM(CASE WHEN tx_type='VERKAUF' THEN 1 ELSE 0 END) AS sells,
-                   MAX(tx_date)    AS last_date,
-                   MAX(created_at) AS last_seen,
+                   MAX(tx_date) AS last_date,
                    GROUP_CONCAT(tx_type || '|' || COALESCE(tx_date,'') ORDER BY created_at ASC) AS history
-            FROM trump_holdings
-            GROUP BY ticker
-            ORDER BY last_seen DESC
+            FROM trump_holdings GROUP BY ticker
         """).fetchall()
+        ptr_map = {r[0]: r for r in ptr_rows}  # ticker → row
     except Exception:
-        db_rows = []
+        ptr_map = {}
 
-    # Letztes PTR-Datum ermitteln (für NEU-Badge)
-    try:
-        latest_ptr_at = conn.execute(
-            "SELECT MAX(created_at) FROM trump_holdings"
-        ).fetchone()[0] or ""
-        latest_ptr_date = latest_ptr_at[:10]
-    except Exception:
-        latest_ptr_date = ""
+    def _ptr_badge(ticker):
+        r = ptr_map.get(ticker)
+        if not r:
+            return ""
+        _, _, buys, sells, last_date, history = r
+        net  = buys - sells
+        txs  = [x.split("|") for x in (history or "").split(",") if x]
+        last = txs[-1][0] if txs else ""
+        prev_net = sum(1 if t[0]=="KAUF" else -1 if t[0]=="VERKAUF" else 0 for t in txs[:-1])
+        if net <= 0:
+            return ('<span style="background:#fee2e2;color:#dc2626;font-size:10px;'
+                    'font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">VERKAUFT</span>')
+        if prev_net <= 0:
+            return ('<span style="background:#d1fae5;color:#059669;font-size:10px;'
+                    'font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">NEU</span>')
+        if last == "KAUF":
+            return (f'<span style="background:#dbeafe;color:#2563eb;font-size:10px;'
+                    f'font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">'
+                    f'+{buys}× KAUF</span>')
+        if last == "VERKAUF" and net > 0:
+            return ('<span style="background:#fef3c7;color:#d97706;font-size:10px;'
+                    'font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">REDUZIERT</span>')
+        return ""
 
-    def _badge(buys, sells, last_date, history):
+    def _badge_ptr_only(buys, sells, history):
         net = buys - sells
         txs = [x.split("|") for x in (history or "").split(",") if x]
-        last_type = txs[-1][0] if txs else ""
-        prev_net  = sum(1 if t[0]=="KAUF" else -1 if t[0]=="VERKAUF" else 0
-                        for t in txs[:-1])
+        last = txs[-1][0] if txs else ""
+        prev_net = sum(1 if t[0]=="KAUF" else -1 if t[0]=="VERKAUF" else 0 for t in txs[:-1])
         if net <= 0:
             return ('<span style="background:#fee2e2;color:#dc2626;font-size:10px;'
                     'font-weight:700;padding:2px 6px;border-radius:4px;">VERKAUFT</span>')
+        if prev_net <= 0 and net > 0:
+            return ('<span style="background:#d1fae5;color:#059669;font-size:10px;'
+                    'font-weight:700;padding:2px 6px;border-radius:4px;">NEU</span>')
+        if last == "KAUF":
+            return ('<span style="background:#dbeafe;color:#2563eb;font-size:10px;'
+                    'font-weight:700;padding:2px 6px;border-radius:4px;">AUFGESTOCKT</span>')
+        if last == "VERKAUF" and net > 0:
+            return ('<span style="background:#fef3c7;color:#d97706;font-size:10px;'
+                    'font-weight:700;padding:2px 6px;border-radius:4px;">REDUZIERT</span>')
+        return ('<span style="background:#f0f0f0;color:#6e6e73;font-size:10px;'
+                'font-weight:700;padding:2px 6px;border-radius:4px;">GEHALTEN</span>')
         if prev_net <= 0 and net > 0:
             return ('<span style="background:#d1fae5;color:#059669;font-size:10px;'
                     'font-weight:700;padding:2px 6px;border-radius:4px;">NEU</span>')
@@ -699,103 +759,124 @@ def holdings_html_block() -> str:
         return ('<span style="background:#f0f0f0;color:#6e6e73;font-size:10px;'
                 'font-weight:700;padding:2px 6px;border-radius:4px;">GEHALTEN</span>')
 
-    td = 'style="padding:6px 10px 6px 0;font-size:12px;vertical-align:top;border-bottom:1px solid #f5f5f7;"'
-
-    stock_rows = ""
-    for ticker, asset_name, buys, sells, last_date, last_seen, history in db_rows:
-        net    = buys - sells
-        badge  = _badge(buys, sells, last_date, history)
-        color  = "#1d1d1f" if net > 0 else "#9ca3af"
-        txinfo = f"{buys}× KAUF" + (f", {sells}× VERKAUF" if sells else "")
-        stock_rows += (
-            f'<tr>'
-            f'<td {td} style="padding:6px 10px 6px 0;font-size:12px;vertical-align:top;'
-            f'border-bottom:1px solid #f5f5f7;font-weight:600;color:{color};">'
-            f'{ticker}</td>'
-            f'<td {td} style="padding:6px 10px 6px 0;font-size:11px;vertical-align:top;'
-            f'border-bottom:1px solid #f5f5f7;color:#6e6e73;">{asset_name[:40]}</td>'
-            f'<td {td} style="padding:6px 10px 6px 0;font-size:11px;vertical-align:top;'
-            f'border-bottom:1px solid #f5f5f7;">{badge}</td>'
-            f'<td {td} style="padding:6px 10px 6px 0;font-size:11px;vertical-align:top;'
-            f'border-bottom:1px solid #f5f5f7;color:#6e6e73;">{txinfo}</td>'
-            f'<td {td} style="padding:6px 0 6px 0;font-size:11px;vertical-align:top;'
-            f'border-bottom:1px solid #f5f5f7;color:#6e6e73;white-space:nowrap;">'
-            f'{last_date or "–"}</td>'
-            f'</tr>'
-        )
-
-    if not stock_rows:
-        stock_rows = (
-            '<tr><td colspan="5" style="padding:10px 0;font-size:12px;color:#9ca3af;">'
-            'Noch keine PTR-Transaktionen in DB — wird beim nächsten OGE-PDF-Parse befüllt.'
-            '</td></tr>'
-        )
-
     th = ('style="padding:0 10px 6px 0;font-size:10px;font-weight:600;color:#9ca3af;'
           'text-align:left;text-transform:uppercase;letter-spacing:0.06em;"')
+    td = 'style="padding:5px 10px 5px 0;font-size:11px;vertical-align:top;border-bottom:1px solid #f5f5f7;"'
 
-    stocks_section = f"""
+    # ── 1. Aktienportfolio: 278e Basis + PTR Deltas ───────────────────────────
+    if snap_rows:
+        # Sortiere nach Wert (größte Position zuerst)
+        sorted_snap = sorted(snap_rows,
+            key=lambda r: _VALUE_SORT_KEY.get(r[2], 9))
+
+        stock_html = ""
+        for asset_name, ticker, value_range, income_type, income_amount in sorted_snap:
+            ptr_badge  = _ptr_badge(ticker) if ticker else ""
+            val_color  = "#1d1d1f" if "None" not in (value_range or "") else "#9ca3af"
+            inc_str    = f"{income_type}: {income_amount}" if income_type and income_amount else ""
+            stock_html += (
+                f'<tr>'
+                f'<td {td} style="padding:5px 10px 5px 0;font-size:11px;vertical-align:top;'
+                f'border-bottom:1px solid #f5f5f7;font-weight:600;color:#1d1d1f;">'
+                f'{ticker or "–"}</td>'
+                f'<td {td} style="color:#6e6e73;">{asset_name[:45]}</td>'
+                f'<td {td} style="color:{val_color};white-space:nowrap;">{value_range or "–"}</td>'
+                f'<td {td} style="color:#6e6e73;font-size:10px;">{inc_str}</td>'
+                f'<td {td}>{ptr_badge}</td>'
+                f'</tr>'
+            )
+
+        snap_label = f"Jahresend {snap_year} · OGE Form 278e"
+        stocks_section = f"""
 <p style="margin:12px 0 4px;font-size:10px;font-weight:700;color:#6e6e73;
    text-transform:uppercase;letter-spacing:0.08em;">
-  Aktienportfolio · OGE Form 278-T PTR
+  Aktienportfolio · {snap_label}
   <span style="font-weight:400;text-transform:none;letter-spacing:0;">
-    (Transaktionen; Positionsgröße aus 278e nicht verfügbar)
+    — sortiert nach Positionsgröße · PTR-Änderungen als Badge
   </span>
 </p>
 <table style="border-collapse:collapse;width:100%;margin-top:2px;">
   <thead><tr>
-    <th {th}>Ticker</th>
-    <th {th}>Name</th>
-    <th {th}>Status</th>
-    <th {th}>Transaktionen</th>
-    <th {th}>Letzter Eintrag</th>
+    <th {th}>Ticker</th><th {th}>Name</th>
+    <th {th}>Wert (Range)</th><th {th}>Einkommen</th>
+    <th {th}>PTR-Delta</th>
   </tr></thead>
-  <tbody>{stock_rows}</tbody>
+  <tbody>{stock_html}</tbody>
 </table>"""
 
-    # ── 2. Strategische Beteiligungen (statisch, exakt bekannt) ───────────────
+    else:
+        # Fallback: nur PTR-Daten (noch kein 278e geparst)
+        ptr_only_rows = list(ptr_map.values())
+        ptr_html = ""
+        for _, asset_name, buys, sells, last_date, history in ptr_only_rows:
+            ticker = _
+            badge  = _badge_ptr_only(buys, sells, history)
+            txinfo = f"{buys}× KAUF" + (f", {sells}× VERKAUF" if sells else "")
+            ptr_html += (
+                f'<tr>'
+                f'<td {td} style="font-weight:600;color:#1d1d1f;">{ticker}</td>'
+                f'<td {td} style="color:#6e6e73;">{asset_name[:45]}</td>'
+                f'<td {td}>{badge}</td>'
+                f'<td {td} style="color:#6e6e73;">{txinfo}</td>'
+                f'<td {td} style="color:#6e6e73;white-space:nowrap;">{last_date or "–"}</td>'
+                f'</tr>'
+            )
+        if not ptr_html:
+            ptr_html = ('<tr><td colspan="5" style="padding:10px 0;font-size:12px;color:#9ca3af;">'
+                        '278e noch nicht geparst — wird beim nächsten Run befüllt.</td></tr>')
+        stocks_section = f"""
+<p style="margin:12px 0 4px;font-size:10px;font-weight:700;color:#6e6e73;
+   text-transform:uppercase;letter-spacing:0.08em;">
+  Aktienportfolio · OGE Form 278-T PTR (278e noch ausstehend)
+</p>
+<table style="border-collapse:collapse;width:100%;margin-top:2px;">
+  <thead><tr>
+    <th {th}>Ticker</th><th {th}>Name</th><th {th}>Status</th>
+    <th {th}>Transaktionen</th><th {th}>Letzter Eintrag</th>
+  </tr></thead>
+  <tbody>{ptr_html}</tbody>
+</table>"""
+
+    # ── 2. Strategische Beteiligungen ─────────────────────────────────────────
     strategic_section = """
 <p style="margin:16px 0 4px;font-size:10px;font-weight:700;color:#6e6e73;
    text-transform:uppercase;letter-spacing:0.08em;">Strategische Beteiligungen</p>
-<table style="border-collapse:collapse;width:100%;margin-top:2px;">
-  <tbody>
-    <tr>
-      <td style="padding:6px 10px 6px 0;font-size:12px;font-weight:600;color:#1d1d1f;
-          border-bottom:1px solid #f5f5f7;vertical-align:top;">DJT</td>
-      <td style="padding:6px 10px 6px 0;font-size:11px;color:#6e6e73;
-          border-bottom:1px solid #f5f5f7;vertical-align:top;">Trump Media &amp; Technology Group</td>
-      <td style="padding:6px 10px 6px 0;font-size:11px;color:#1d1d1f;
-          border-bottom:1px solid #f5f5f7;vertical-align:top;">~57 % / ~114 Mio. Shares</td>
-      <td style="padding:6px 0 6px 0;font-size:11px;color:#6e6e73;
-          border-bottom:1px solid #f5f5f7;white-space:nowrap;">2024-09-20<br>
-        <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000947033&type=4"
-           style="font-size:10px;color:#0071e3;text-decoration:none;">SEC Form 4</a>
-      </td>
-    </tr>
-  </tbody>
-</table>"""
+<table style="border-collapse:collapse;width:100%;margin-top:2px;"><tbody>
+  <tr>
+    <td style="padding:6px 10px 6px 0;font-size:12px;font-weight:600;color:#1d1d1f;
+        border-bottom:1px solid #f5f5f7;vertical-align:top;">DJT</td>
+    <td style="padding:6px 10px 6px 0;font-size:11px;color:#6e6e73;
+        border-bottom:1px solid #f5f5f7;">Trump Media &amp; Technology Group</td>
+    <td style="padding:6px 10px 6px 0;font-size:11px;color:#1d1d1f;
+        border-bottom:1px solid #f5f5f7;">~57 % / ~114 Mio. Shares</td>
+    <td style="padding:6px 0 6px 0;font-size:11px;color:#6e6e73;
+        border-bottom:1px solid #f5f5f7;white-space:nowrap;">2024-09-20<br>
+      <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000947033&type=4"
+         style="font-size:10px;color:#0071e3;text-decoration:none;">SEC Form 4</a>
+    </td>
+  </tr>
+</tbody></table>"""
 
-    # ── 3. Krypto & DeFi (statisch) ───────────────────────────────────────────
+    # ── 3. Krypto & DeFi ──────────────────────────────────────────────────────
     crypto_rows = ""
     for h in TRUMP_KNOWN_HOLDINGS:
         if h["type"] in ("Aktie (börsennotiert)", "Aktien-Portfolio"):
             continue
         crypto_rows += (
             f'<tr>'
-            f'<td style="padding:6px 10px 6px 0;font-size:12px;color:#1d1d1f;'
+            f'<td style="padding:6px 10px 6px 0;font-size:11px;color:#1d1d1f;'
             f'border-bottom:1px solid #f5f5f7;vertical-align:top;">'
             f'<a href="{h["url"]}" style="color:#0071e3;text-decoration:none;">'
             f'{h["asset"]}</a></td>'
             f'<td style="padding:6px 10px 6px 0;font-size:11px;color:#6e6e73;'
-            f'border-bottom:1px solid #f5f5f7;vertical-align:top;">{h["type"]}</td>'
+            f'border-bottom:1px solid #f5f5f7;">{h["type"]}</td>'
             f'<td style="padding:6px 10px 6px 0;font-size:11px;color:#1d1d1f;'
-            f'border-bottom:1px solid #f5f5f7;vertical-align:top;">{h["stake"]}</td>'
-            f'<td style="padding:6px 0 6px 0;font-size:11px;color:#6e6e73;'
+            f'border-bottom:1px solid #f5f5f7;">{h["stake"]}</td>'
+            f'<td style="padding:6px 0;font-size:11px;color:#6e6e73;'
             f'border-bottom:1px solid #f5f5f7;white-space:nowrap;">{h["disclosed"]}<br>'
             f'<span style="font-size:10px;">{h["source"]}</span></td>'
             f'</tr>'
         )
-
     crypto_section = f"""
 <p style="margin:16px 0 4px;font-size:10px;font-weight:700;color:#6e6e73;
    text-transform:uppercase;letter-spacing:0.08em;">Krypto &amp; DeFi</p>
@@ -1469,6 +1550,108 @@ def _oge_date_from_url(pdf_url: str) -> str:
     return f"{m.group(1)}-{m.group(2)}-01" if m else ""
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# OGE FORM 278e  –  Jährlicher Snapshot via Claude Vision OCR
+# ─────────────────────────────────────────────────────────────────────────────
+_278E_PART6_START = 86   # PDF-Seite wo Part 6 (Other Assets) beginnt
+_278E_PART6_END   = 146  # PDF-Seite wo Part 6 endet (inklusiv)
+
+_278E_EXTRACT_PROMPT = """This is a page from Trump's OGE Form 278e financial disclosure.
+Extract EVERY row from the Part 6 table (Other Assets and Income).
+Return ONLY a JSON array, no other text. Each element:
+{"asset": "full name as written", "value": "value range as written", "income_type": "type or empty", "income_amount": "amount or empty"}
+If a row has no value (blank or 'None (or less than $1,001)'), still include it with value as written.
+Skip header rows and the 'INVESTMENT ACCOUNT #4' section header.
+If the page has no Part 6 table data, return []."""
+
+def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
+    """
+    Lädt 278e-PDF, rendert Part-6-Seiten als Bilder, schickt sie an Claude Vision,
+    speichert extrahierte Positionen in trump_278e_snapshot.
+    Gibt Anzahl gespeicherter Zeilen zurück.
+    """
+    try:
+        import fitz
+    except ImportError:
+        log.warning("pymupdf nicht installiert — 278e Vision-Parsing übersprungen")
+        return 0
+
+    log.info(f"  📄 278e Vision-OCR: Lade PDF ({pdf_url[:60]}…)")
+    try:
+        r = requests.get(pdf_url, headers=OGE_HEADERS, timeout=60)
+        r.raise_for_status()
+        doc = fitz.open(stream=r.content, filetype="pdf")
+    except Exception as e:
+        log.warning(f"  ⚠️  278e PDF Download Fehler: {e}")
+        return 0
+
+    # Bestehende Einträge für dieses Jahr löschen (Neuparse überschreibt)
+    conn.execute("DELETE FROM trump_278e_snapshot WHERE year=? AND pdf_url=?",
+                 (year, pdf_url))
+    conn.commit()
+
+    total_saved = 0
+    pages_to_parse = range(_278E_PART6_START - 1, min(_278E_PART6_END, len(doc)))
+    log.info(f"  📄 278e: Verarbeite {len(pages_to_parse)} Seiten via Claude Vision…")
+
+    for pg_idx in pages_to_parse:
+        try:
+            page = doc[pg_idx]
+            pix  = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))  # 108dpi
+            img_b64 = base64.standard_b64encode(pix.tobytes("png")).decode()
+
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4096,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": "image/png", "data": img_b64
+                    }},
+                    {"type": "text", "text": _278E_EXTRACT_PROMPT},
+                ]}],
+            )
+            raw = resp.content[0].text.strip()
+            # JSON extrahieren
+            m = re.search(r'\[.*\]', raw, re.DOTALL)
+            if not m:
+                continue
+            rows = json.loads(m.group(0))
+            if not rows:
+                continue
+
+            now = now_utc().isoformat()
+            for row in rows:
+                asset_name  = str(row.get("asset", "")).strip()
+                value_range = str(row.get("value", "")).strip()
+                income_type = str(row.get("income_type", "")).strip()
+                income_amt  = str(row.get("income_amount", "")).strip()
+                if not asset_name:
+                    continue
+                ticker = _ticker_from_asset_name(asset_name)
+                conn.execute(
+                    "INSERT INTO trump_278e_snapshot "
+                    "(year,asset_name,ticker,value_range,income_type,income_amount,pdf_url,parsed_at) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (year, asset_name, ticker, value_range, income_type, income_amt, pdf_url, now),
+                )
+                total_saved += 1
+            conn.commit()
+            log.info(f"    S.{pg_idx+1}: {len(rows)} Positionen extrahiert")
+
+        except json.JSONDecodeError:
+            log.warning(f"    S.{pg_idx+1}: JSON-Parse Fehler")
+        except Exception as e:
+            log.warning(f"    S.{pg_idx+1}: {e}")
+
+    log.info(f"  ✅ 278e: {total_saved} Positionen gespeichert (Jahr {year})")
+    return total_saved
+
+
+def _is_278e_pdf(pdf_url: str) -> bool:
+    """278e-PDF hat keinen 'Periodic-Transaction-Report' im Namen."""
+    return "periodic-transaction-report" not in pdf_url.lower()
+
+
 def reparse_oge_ptr(pdf_url: str) -> None:
     """
     Löscht einen bereits gesehenen PTR aus oge_ptrs, sodass er beim
@@ -1526,6 +1709,21 @@ def check_oge_alerts() -> None:
             continue
 
         log.info("Neues OGE PDF: %s…", pdf_url[:80])
+
+        # 278e (jährliche Disclosure) vs. 278-T (Periodic Transaction Report)
+        if _is_278e_pdf(pdf_url):
+            year_m = re.search(r'/(\d{4})/', pdf_url)
+            year   = int(year_m.group(1)) if year_m else now_utc().year
+            n = parse_278e_via_claude_vision(pdf_url, year)
+            conn.execute(
+                "INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
+                (pdf_url, source, n, now_utc().isoformat()),
+            )
+            conn.commit()
+            if n:
+                new_count += 1
+            continue
+
         transactions = parse_oge_ptr_pdf(pdf_url)
 
         conn.execute(
@@ -1534,7 +1732,6 @@ def check_oge_alerts() -> None:
         )
         conn.commit()
 
-        # Bug 2 fix: kein Alert bei 0 erkannten Transaktionen
         if not transactions:
             log.warning(
                 "OGE PDF geparst aber 0 Transaktionen erkannt — kein Alert: %s", pdf_url
