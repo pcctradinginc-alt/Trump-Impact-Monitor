@@ -1337,7 +1337,7 @@ def fetch_oge_ptr_links() -> list[dict]:
     return unique
 
 
-def parse_oge_ptr_pdf(pdf_url: str) -> list[dict]:
+def parse_oge_ptr_pdf(pdf_url: str, db_conn=None) -> list[dict]:
     """
     Lädt ein OGE 278-T PDF und extrahiert Transaktionszeilen mit pdfplumber.
     Gibt [{asset, tx_type, date, amount, row_text}] zurück.
@@ -1387,7 +1387,7 @@ def parse_oge_ptr_pdf(pdf_url: str) -> list[dict]:
                                 "tx_type":  "?",
                                 "row_text": line,
                             })
-        _save_oge_holdings(transactions, pdf_url)
+        _save_oge_holdings(transactions, pdf_url, db_conn=db_conn)
         return transactions
     except Exception as e:
         log.warning(f"  ⚠️  OGE PDF Parse Fehler ({pdf_url}): {e}")
@@ -1416,21 +1416,22 @@ def _ticker_from_asset_name(name: str) -> str | None:
             return ticker
     return None
 
-def _save_oge_holdings(transactions: list[dict], pdf_url: str) -> None:
+def _save_oge_holdings(transactions: list[dict], pdf_url: str, db_conn=None) -> None:
     """Speichert OGE-Transaktionen in trump_holdings-Tabelle."""
+    c   = db_conn or conn
     now = now_utc().isoformat()
     saved = 0
     for tx in transactions:
         ticker = _ticker_from_asset_name(tx.get("asset", ""))
         if not ticker:
             continue
-        exists = conn.execute(
+        exists = c.execute(
             "SELECT 1 FROM trump_holdings WHERE ticker=? AND pdf_url=? AND tx_type=?",
             (ticker, pdf_url, tx.get("tx_type", "?")),
         ).fetchone()
         if exists:
             continue
-        conn.execute(
+        c.execute(
             "INSERT INTO trump_holdings (ticker,asset_name,tx_type,amount,tx_date,pdf_url,created_at) "
             "VALUES (?,?,?,?,?,?,?)",
             (ticker, tx.get("asset",""), tx.get("tx_type","?"),
@@ -1438,7 +1439,7 @@ def _save_oge_holdings(transactions: list[dict], pdf_url: str) -> None:
         )
         saved += 1
     if saved:
-        conn.commit()
+        c.commit()
         log.info(f"  💾 OGE Holdings: {saved} Ticker in trump_holdings gespeichert")
 
 
@@ -1961,7 +1962,7 @@ def send_278e_alert(pdf_url: str, year: int) -> None:
              f"{n_sold} SOLD OUT, {n_red} REDUCED")
 
 
-def parse_ptr_via_claude_vision(pdf_url: str) -> list[dict]:
+def parse_ptr_via_claude_vision(pdf_url: str, db_conn=None) -> list[dict]:
     """
     Parst ein OGE 278-T PTR-PDF via Claude Vision.
     Gibt Liste von Transaktions-Dicts zurück und speichert Aktien in trump_holdings.
@@ -1981,6 +1982,7 @@ def parse_ptr_via_claude_vision(pdf_url: str) -> list[dict]:
         return []
 
     all_transactions = []
+    c    = db_conn or conn
     now  = now_utc().isoformat()
     pages = list(range(len(doc)))
     batches = [pages[i:i+_VISION_BATCH_SIZE]
@@ -2030,18 +2032,18 @@ def parse_ptr_via_claude_vision(pdf_url: str) -> list[dict]:
                 all_transactions.append(tx)
                 ticker = _ticker_from_asset_name(asset)
                 if ticker:
-                    exists = conn.execute(
+                    exists = c.execute(
                         "SELECT 1 FROM trump_holdings WHERE ticker=? AND pdf_url=? AND tx_type=? AND tx_date=?",
                         (ticker, pdf_url, tx_type, date),
                     ).fetchone()
                     if not exists:
-                        conn.execute(
+                        c.execute(
                             "INSERT INTO trump_holdings "
                             "(ticker,asset_name,tx_type,amount,tx_date,pdf_url,created_at) "
                             "VALUES (?,?,?,?,?,?,?)",
                             (ticker, asset, tx_type, amount, date, pdf_url, now),
                         )
-            conn.commit()
+            c.commit()
             if rows:
                 log.info(f"    PTR Batch {batch_idx+1}/{len(batches)}: {len(rows)} Tx")
 
@@ -2052,7 +2054,7 @@ def parse_ptr_via_claude_vision(pdf_url: str) -> list[dict]:
             consecutive_errors += 1
             log.warning(f"    PTR Batch {batch_idx+1}: {e} ({consecutive_errors}/{_VISION_MAX_ERRORS})")
 
-    stocks_found = conn.execute(
+    stocks_found = c.execute(
         "SELECT COUNT(*) FROM trump_holdings WHERE pdf_url=?", (pdf_url,)
     ).fetchone()[0]
     log.info(f"  ✅ PTR Vision: {len(all_transactions)} Transaktionen, {stocks_found} Aktien gespeichert")
@@ -2133,7 +2135,7 @@ def check_oge_alerts() -> None:
             new_count += 1
 
     def _process_ptr(item):
-        """Verarbeitet ein PTR-PDF — läuft parallel."""
+        """Verarbeitet ein PTR-PDF — läuft parallel mit eigener DB-Connection."""
         pdf_url    = item["pdf_url"]
         source     = item["source"]
         pdf_date   = _oge_date_from_url(pdf_url)
@@ -2141,24 +2143,31 @@ def check_oge_alerts() -> None:
         label      = "" if send_alert else " (historisch)"
         log.info("Neues PTR%s: %s…", label, pdf_url[:70])
 
-        transactions = parse_oge_ptr_pdf(pdf_url)
-        if not transactions:
-            transactions = parse_ptr_via_claude_vision(pdf_url)
+        # Eigene DB-Connection pro Thread (SQLite ist nicht thread-safe)
+        thread_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        thread_conn.row_factory = sqlite3.Row
 
-        conn.execute("INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
-                     (pdf_url, source, len(transactions), now_utc().isoformat()))
-        conn.commit()
+        try:
+            transactions = parse_oge_ptr_pdf(pdf_url, db_conn=thread_conn)
+            if not transactions:
+                transactions = parse_ptr_via_claude_vision(pdf_url, db_conn=thread_conn)
 
-        if not transactions:
-            log.warning("OGE PTR: 0 Tx nach Vision — übersprungen: %s", pdf_url)
-            return 0
+            thread_conn.execute("INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
+                         (pdf_url, source, len(transactions), now_utc().isoformat()))
+            thread_conn.commit()
 
-        if send_alert:
-            send_oge_alert(pdf_url, source, transactions)
-            return 1
-        else:
-            log.info("  📥 Historischer PTR geparst (%d Tx) — kein Alert", len(transactions))
-            return 0
+            if not transactions:
+                log.warning("OGE PTR: 0 Tx nach Vision — übersprungen: %s", pdf_url)
+                return 0
+
+            if send_alert:
+                send_oge_alert(pdf_url, source, transactions)
+                return 1
+            else:
+                log.info("  📥 Historischer PTR geparst (%d Tx) — kein Alert", len(transactions))
+                return 0
+        finally:
+            thread_conn.close()
 
     # PTRs parallel mit max 3 gleichzeitigen Threads
     if ptr_items:
