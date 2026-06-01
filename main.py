@@ -1381,25 +1381,28 @@ YF_TICKER_MAP = {
 def fetch_market_data(ticker: str) -> dict:
     """Holt 1-Monats-History von Yahoo Finance. Bei Fehler leeres Dict."""
     yf_sym = YF_TICKER_MAP.get(ticker.upper(), ticker.upper())
-    try:
-        hist = yf.Ticker(yf_sym).history(period="1mo", auto_adjust=True,
-                                          timeout=15)
-        if hist.empty or len(hist) < 2:
-            return {}
-        close      = hist["Close"]
-        current    = round(float(close.iloc[-1]), 2)
-        prev_close = round(float(close.iloc[-2]), 2)
-        week_ago   = round(float(close.iloc[-6]) if len(close) >= 6 else float(close.iloc[0]), 2)
-        month_ago  = round(float(close.iloc[0]), 2)
-        return {
-            "price":   current,
-            "chg_1d":  round((current / prev_close - 1) * 100, 2),
-            "chg_1w":  round((current / week_ago   - 1) * 100, 2),
-            "chg_1m":  round((current / month_ago  - 1) * 100, 2),
-        }
-    except Exception as e:
-        log.warning(f"  ⚠️  Yahoo Finance ({ticker}): {e}")
-        return {}
+    for attempt in range(3):
+        try:
+            hist = yf.Ticker(yf_sym).history(period="1mo", auto_adjust=True,
+                                              timeout=15)
+            if hist.empty or len(hist) < 2:
+                return {}
+            close      = hist["Close"]
+            current    = round(float(close.iloc[-1]), 2)
+            prev_close = round(float(close.iloc[-2]), 2)
+            week_ago   = round(float(close.iloc[-6]) if len(close) >= 6 else float(close.iloc[0]), 2)
+            month_ago  = round(float(close.iloc[0]), 2)
+            return {
+                "price":   current,
+                "chg_1d":  round((current / prev_close - 1) * 100, 2),
+                "chg_1w":  round((current / week_ago   - 1) * 100, 2),
+                "chg_1m":  round((current / month_ago  - 1) * 100, 2),
+            }
+        except Exception as e:
+            log.warning(f"  ⚠️  Yahoo Finance ({ticker}) attempt {attempt+1}: {e}")
+            if attempt < 2:
+                import time; time.sleep(2 ** attempt)
+    return {}
 
 def format_market_block(ticker: str) -> str:
     d = fetch_market_data(ticker)
