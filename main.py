@@ -1670,7 +1670,183 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
             log.warning(f"    S.{pg_idx+1}: {e}")
 
     log.info(f"  ✅ 278e: {total_saved} Positionen gespeichert (Jahr {year})")
+    send_278e_alert(pdf_url, year)
     return total_saved
+
+
+def send_278e_alert(pdf_url: str, year: int) -> None:
+    """
+    Sendet E-Mail mit vollständigem 278e-Portfolio-Vergleich:
+    neues Jahr vs. Vorjahr → NEW BUY / ADD / SOLD OUT / REDUCED / UNCHANGED
+    """
+    # Neues Jahr
+    new_rows = conn.execute("""
+        SELECT asset_name, ticker, value_range, income_type, income_amount
+        FROM trump_278e_snapshot WHERE year=? ORDER BY asset_name
+    """, (year,)).fetchall()
+
+    # Vorjahr
+    prev_year = conn.execute("""
+        SELECT MAX(year) FROM trump_278e_snapshot WHERE year<?
+    """, (year,)).fetchone()[0]
+    prev_map = {}
+    if prev_year:
+        prev_rows = conn.execute("""
+            SELECT asset_name, ticker, value_range FROM trump_278e_snapshot WHERE year=?
+        """, (prev_year,)).fetchall()
+        prev_map = {r[0].strip().upper(): (r[1], r[2]) for r in prev_rows}
+
+    # Wert-Rang für Sortierung und Vergleich
+    def _rank(v):
+        return _VALUE_SORT_KEY.get(v or "", 10)
+
+    def _change_badge(asset_name, new_val):
+        key = asset_name.strip().upper()
+        if key not in prev_map:
+            return "NEW BUY", "#d1fae5", "#059669"
+        old_val = prev_map[key][1]
+        if _rank(new_val) < _rank(old_val):
+            return "ADD", "#dbeafe", "#2563eb"
+        if _rank(new_val) > _rank(old_val):
+            return "REDUCED", "#fef3c7", "#d97706"
+        return "UNCHANGED", "#f5f5f7", "#6e6e73"
+
+    # Verkaufte Positionen (im Vorjahr, nicht mehr im neuen Jahr)
+    new_keys = {r[0].strip().upper() for r in new_rows}
+    sold_out = []
+    if prev_year:
+        for asset_name, ticker, old_val in conn.execute("""
+            SELECT asset_name, ticker, value_range FROM trump_278e_snapshot WHERE year=?
+            ORDER BY asset_name
+        """, (prev_year,)).fetchall():
+            if asset_name.strip().upper() not in new_keys:
+                sold_out.append((asset_name, ticker, old_val))
+
+    # Zeilen bauen — sortiert nach Positionsgröße, dann Badge
+    sorted_rows = sorted(new_rows, key=lambda r: _rank(r[2]))
+
+    badge_order = {"NEW BUY": 0, "ADD": 1, "REDUCED": 2, "UNCHANGED": 3}
+    sorted_rows = sorted(new_rows,
+        key=lambda r: (_rank(r[2]), badge_order.get(
+            _change_badge(r[0], r[2])[0], 9)))
+
+    def _td(content, color="#1d1d1f", bold=False, small=False):
+        fs = "10px" if small else "11px"
+        fw = "700" if bold else "400"
+        return (f'<td style="padding:5px 10px 5px 0;font-size:{fs};font-weight:{fw};'
+                f'color:{color};vertical-align:top;border-bottom:1px solid #f5f5f7;">'
+                f'{content}</td>')
+
+    rows_html = ""
+    for asset_name, ticker, value_range, income_type, income_amount in sorted_rows:
+        label, bg, fg = _change_badge(asset_name, value_range)
+        badge = (f'<span style="background:{bg};color:{fg};font-size:9px;font-weight:700;'
+                 f'padding:2px 5px;border-radius:3px;">{label}</span>')
+        inc = f"{income_type}: {income_amount}" if income_type and income_amount else "–"
+        rows_html += (
+            f'<tr style="background:{"#fafffe" if label != "UNCHANGED" else "#fff"};">'
+            + _td(ticker or "–", bold=True)
+            + _td(asset_name[:50], "#6e6e73")
+            + _td(value_range or "–")
+            + _td(inc, "#6e6e73", small=True)
+            + _td(badge)
+            + "</tr>"
+        )
+
+    # Sold-out Zeilen
+    sold_html = ""
+    for asset_name, ticker, old_val in sold_out:
+        badge = ('<span style="background:#fee2e2;color:#dc2626;font-size:9px;font-weight:700;'
+                 'padding:2px 5px;border-radius:3px;">SOLD OUT</span>')
+        sold_html += (
+            '<tr style="background:#fff8f8;">'
+            + _td(ticker or "–", "#9ca3af", bold=True)
+            + _td(f'<s>{asset_name[:50]}</s>', "#9ca3af")
+            + _td(f'<s>{old_val or "–"}</s>', "#9ca3af")
+            + _td("–", "#9ca3af", small=True)
+            + _td(badge)
+            + "</tr>"
+        )
+
+    th = ('style="padding:0 10px 6px 0;font-size:10px;font-weight:600;color:#9ca3af;'
+          'text-align:left;text-transform:uppercase;letter-spacing:0.05em;"')
+
+    # Statistik
+    n_new    = sum(1 for r in new_rows if _change_badge(r[0], r[2])[0] == "NEW BUY")
+    n_add    = sum(1 for r in new_rows if _change_badge(r[0], r[2])[0] == "ADD")
+    n_red    = sum(1 for r in new_rows if _change_badge(r[0], r[2])[0] == "REDUCED")
+    n_unch   = sum(1 for r in new_rows if _change_badge(r[0], r[2])[0] == "UNCHANGED")
+    n_sold   = len(sold_out)
+    prev_label = f"vs. {prev_year}" if prev_year else "kein Vorjahr verfügbar"
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="de"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f5f5f7;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f7;padding:32px 0;">
+<tr><td align="center">
+<table width="680" cellpadding="0" cellspacing="0" style="max-width:680px;width:100%;">
+
+  <tr><td style="background:#1d1d1f;border-radius:16px 16px 0 0;padding:28px 32px;">
+    <p style="margin:0 0 4px;font-family:-apple-system,sans-serif;font-size:11px;
+       font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      OGE Form 278e · Jährliche Finanz-Disclosure
+    </p>
+    <h1 style="margin:0;font-family:-apple-system,sans-serif;font-size:22px;
+       font-weight:700;color:#f5f5f7;letter-spacing:-0.02em;">
+      Trump Portfolio Update {year} <span style="color:#6e6e73;font-size:14px;font-weight:400;">{prev_label}</span>
+    </h1>
+  </td></tr>
+
+  <tr><td style="background:#fff;padding:20px 32px 8px;">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        {''.join(f'<td style="text-align:center;padding:8px 12px;border-radius:8px;background:{bg};">'
+                 f'<div style="font-size:20px;font-weight:700;color:{fg};">{n}</div>'
+                 f'<div style="font-size:10px;font-weight:600;color:{fg};text-transform:uppercase;">{lbl}</div>'
+                 f'</td>'
+                 for n, lbl, bg, fg in [
+                     (n_new, "New Buy", "#d1fae5", "#059669"),
+                     (n_add, "Add", "#dbeafe", "#2563eb"),
+                     (n_red, "Reduced", "#fef3c7", "#d97706"),
+                     (n_sold, "Sold Out", "#fee2e2", "#dc2626"),
+                     (n_unch, "Unchanged", "#f5f5f7", "#6e6e73"),
+                     (len(new_rows), "Total", "#1d1d1f", "#f5f5f7"),
+                 ])}
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td style="background:#fff;padding:16px 32px 24px;">
+    <table style="border-collapse:collapse;width:100%;">
+      <thead><tr>
+        <th {th}>Ticker</th><th {th}>Asset</th>
+        <th {th}>Wert (Range)</th><th {th}>Einkommen</th>
+        <th {th}>Änderung</th>
+      </tr></thead>
+      <tbody>
+        {rows_html}
+        {sold_html}
+      </tbody>
+    </table>
+  </td></tr>
+
+  <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:16px 32px;
+       border-top:1px solid #e5e5ea;">
+    <p style="margin:0;font-family:-apple-system,sans-serif;font-size:11px;color:#6e6e73;">
+      OGE Form 278e · Jahr {year} · {len(new_rows)} Positionen ·
+      <a href="{pdf_url}" style="color:#0071e3;text-decoration:none;">PDF öffnen ↗</a> ·
+      Generiert: {now_utc().strftime('%Y-%m-%d %H:%M UTC')}
+    </p>
+  </td></tr>
+
+</table></td></tr></table>
+</body></html>"""
+
+    subject = (f"🏛️ Trump Portfolio 278e {year}: "
+               f"{n_new} NEW · {n_add} ADD · {n_sold} SOLD OUT · {n_red} REDUCED")
+    send_gmail(subject, html_body)
+    log.info(f"  📨 278e Alert: {len(new_rows)} Positionen, {n_new} NEW, {n_add} ADD, "
+             f"{n_sold} SOLD OUT, {n_red} REDUCED")
 
 
 def parse_ptr_via_claude_vision(pdf_url: str) -> list[dict]:
