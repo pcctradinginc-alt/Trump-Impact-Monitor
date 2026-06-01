@@ -3,6 +3,7 @@ import re
 import json
 import base64
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import socket
 import html
@@ -1648,8 +1649,10 @@ def _oge_date_from_url(pdf_url: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # OGE FORM 278e  –  Jährlicher Snapshot via Claude Vision OCR
 # ─────────────────────────────────────────────────────────────────────────────
-_278E_PART6_START = 86   # Fallback-Seite wenn Auto-Detection fehlschlägt
-_278E_PART6_END   = 146  # Fallback-Ende
+_278E_PART6_START  = 86   # Fallback-Seite wenn Auto-Detection fehlschlägt
+_278E_PART6_END    = 146  # Fallback-Ende
+_VISION_BATCH_SIZE = 5    # Seiten pro API-Call (max ~8 sinnvoll)
+_VISION_MAX_ERRORS = 3    # Circuit-Breaker: Abbruch nach N aufeinanderfolgenden Fehlern
 
 _PTR_EXTRACT_PROMPT = """This is a page from Trump's OGE Form 278-T Periodic Transaction Report.
 Extract EVERY transaction row from the table.
@@ -1712,35 +1715,46 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
             part6_end = i
             log.info(f"  📄 278e Auto-Detection: Part 6 endet auf Seite {i} (Part 7 ab S.{i+1})")
             break
-    pages_to_parse = range(part6_start, part6_end)
-    log.info(f"  📄 278e: Verarbeite {len(pages_to_parse)} Seiten (S.{part6_start+1}–{part6_end}) via Claude Vision…")
+    # Auto-Detection-Sanity-Check: erkannte Startseite darf nicht > Ende sein
+    if part6_start >= part6_end:
+        log.warning(f"  ⚠️  278e Auto-Detection ungültig (S.{part6_start+1} ≥ {part6_end}), nutze Fallback")
+        part6_start = _278E_PART6_START - 1
+        part6_end   = min(_278E_PART6_END, len(doc))
 
-    for pg_idx in pages_to_parse:
+    pages_to_parse = list(range(part6_start, part6_end))
+    batches = [pages_to_parse[i:i+_VISION_BATCH_SIZE]
+               for i in range(0, len(pages_to_parse), _VISION_BATCH_SIZE)]
+    log.info(f"  📄 278e: {len(pages_to_parse)} Seiten in {len(batches)} Batches à {_VISION_BATCH_SIZE} (S.{part6_start+1}–{part6_end})")
+
+    consecutive_errors = 0
+    now = now_utc().isoformat()
+
+    for batch_idx, batch in enumerate(batches):
+        if consecutive_errors >= _VISION_MAX_ERRORS:
+            log.warning(f"  ⛔ 278e Circuit-Breaker: {_VISION_MAX_ERRORS} Fehler in Folge → Abbruch")
+            break
         try:
-            page = doc[pg_idx]
-            pix  = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))  # 108dpi
-            img_b64 = base64.standard_b64encode(pix.tobytes("png")).decode()
+            content = []
+            for pg_idx in batch:
+                pix = doc[pg_idx].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+                img_b64 = base64.standard_b64encode(pix.tobytes("png")).decode()
+                content.append({"type": "text", "text": f"Page {pg_idx+1}:"})
+                content.append({"type": "image", "source": {
+                    "type": "base64", "media_type": "image/png", "data": img_b64
+                }})
+            content.append({"type": "text", "text":
+                _278E_EXTRACT_PROMPT +
+                "\nReturn ONE combined JSON array for ALL pages shown above."})
 
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=4096,
-                messages=[{"role": "user", "content": [
-                    {"type": "image", "source": {
-                        "type": "base64", "media_type": "image/png", "data": img_b64
-                    }},
-                    {"type": "text", "text": _278E_EXTRACT_PROMPT},
-                ]}],
+                messages=[{"role": "user", "content": content}],
             )
-            raw = resp.content[0].text.strip()
-            # JSON extrahieren
-            m = re.search(r'\[.*\]', raw, re.DOTALL)
-            if not m:
-                continue
-            rows = json.loads(m.group(0))
-            if not rows:
-                continue
+            raw  = resp.content[0].text.strip()
+            m    = re.search(r'\[.*\]', raw, re.DOTALL)
+            rows = json.loads(m.group(0)) if m else []
 
-            now = now_utc().isoformat()
             for row in rows:
                 asset_name  = str(row.get("asset", "")).strip()
                 value_range = str(row.get("value", "")).strip()
@@ -1757,12 +1771,15 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
                 )
                 total_saved += 1
             conn.commit()
-            log.info(f"    S.{pg_idx+1}: {len(rows)} Positionen extrahiert")
+            consecutive_errors = 0
+            log.info(f"    Batch {batch_idx+1}/{len(batches)} (S.{batch[0]+1}-{batch[-1]+1}): {len(rows)} Positionen")
 
         except json.JSONDecodeError:
-            log.warning(f"    S.{pg_idx+1}: JSON-Parse Fehler")
+            consecutive_errors += 1
+            log.warning(f"    Batch {batch_idx+1}: JSON-Fehler ({consecutive_errors}/{_VISION_MAX_ERRORS})")
         except Exception as e:
-            log.warning(f"    S.{pg_idx+1}: {e}")
+            consecutive_errors += 1
+            log.warning(f"    Batch {batch_idx+1}: {e} ({consecutive_errors}/{_VISION_MAX_ERRORS})")
 
     log.info(f"  ✅ 278e: {total_saved} Positionen gespeichert (Jahr {year})")
     send_278e_alert(pdf_url, year)
@@ -1964,46 +1981,53 @@ def parse_ptr_via_claude_vision(pdf_url: str) -> list[dict]:
         return []
 
     all_transactions = []
-    now = now_utc().isoformat()
+    now  = now_utc().isoformat()
+    pages = list(range(len(doc)))
+    batches = [pages[i:i+_VISION_BATCH_SIZE]
+               for i in range(0, len(pages), _VISION_BATCH_SIZE)]
+    consecutive_errors = 0
 
-    for pg_idx, page in enumerate(doc):
+    for batch_idx, batch in enumerate(batches):
+        if consecutive_errors >= _VISION_MAX_ERRORS:
+            log.warning(f"  ⛔ PTR Circuit-Breaker nach {_VISION_MAX_ERRORS} Fehlern → Abbruch")
+            break
         try:
-            pix    = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            img_b64 = base64.standard_b64encode(pix.tobytes("png")).decode()
-            resp   = client.messages.create(
+            content = []
+            for pg_idx in batch:
+                pix = doc[pg_idx].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+                img_b64 = base64.standard_b64encode(pix.tobytes("png")).decode()
+                content.append({"type": "text", "text": f"Page {pg_idx+1}:"})
+                content.append({"type": "image", "source": {
+                    "type": "base64", "media_type": "image/png", "data": img_b64
+                }})
+            content.append({"type": "text", "text":
+                _PTR_EXTRACT_PROMPT +
+                "\nReturn ONE combined JSON array for ALL pages shown above."})
+
+            resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=4096,
-                messages=[{"role": "user", "content": [
-                    {"type": "image", "source": {
-                        "type": "base64", "media_type": "image/png", "data": img_b64
-                    }},
-                    {"type": "text", "text": _PTR_EXTRACT_PROMPT},
-                ]}],
+                messages=[{"role": "user", "content": content}],
             )
-            raw = resp.content[0].text.strip()
-            m   = re.search(r'\[.*\]', raw, re.DOTALL)
-            if not m:
-                continue
-            rows = json.loads(m.group(0))
-            if not rows:
-                continue
+            raw  = resp.content[0].text.strip()
+            m    = re.search(r'\[.*\]', raw, re.DOTALL)
+            rows = json.loads(m.group(0)) if m else []
+            consecutive_errors = 0
 
             for row in rows:
-                asset  = str(row.get("asset", "")).strip()
+                asset       = str(row.get("asset", "")).strip()
                 tx_type_raw = str(row.get("type", "")).strip().lower()
-                date   = str(row.get("date", "")).strip()
-                amount = str(row.get("amount", "")).strip()
+                date        = str(row.get("date", "")).strip()
+                amount      = str(row.get("amount", "")).strip()
                 if not asset:
                     continue
-                tx_type = ("KAUF" if "purchase" in tx_type_raw
-                           else "VERKAUF" if "sale" in tx_type_raw
-                           else "TAUSCH" if "exchange" in tx_type_raw
-                           else "?")
+                tx_type = ("KAUF"    if "purchase" in tx_type_raw
+                           else "VERKAUF" if "sale"     in tx_type_raw
+                           else "TAUSCH"  if "exchange" in tx_type_raw else "?")
                 tx = {"asset": asset, "tx_type": tx_type,
-                      "tx_date": date, "amount": amount, "row_text": f"{asset} | {tx_type} | {date} | {amount}"}
+                      "tx_date": date, "amount": amount,
+                      "row_text": f"{asset} | {tx_type} | {date} | {amount}"}
                 all_transactions.append(tx)
-
-                # Nur Aktien in trump_holdings speichern (keine Anleihen)
                 ticker = _ticker_from_asset_name(asset)
                 if ticker:
                     exists = conn.execute(
@@ -2012,18 +2036,21 @@ def parse_ptr_via_claude_vision(pdf_url: str) -> list[dict]:
                     ).fetchone()
                     if not exists:
                         conn.execute(
-                            "INSERT INTO trump_holdings (ticker,asset_name,tx_type,amount,tx_date,pdf_url,created_at) "
+                            "INSERT INTO trump_holdings "
+                            "(ticker,asset_name,tx_type,amount,tx_date,pdf_url,created_at) "
                             "VALUES (?,?,?,?,?,?,?)",
                             (ticker, asset, tx_type, amount, date, pdf_url, now),
                         )
             conn.commit()
             if rows:
-                log.info(f"    PTR S.{pg_idx+1}: {len(rows)} Transaktionen")
+                log.info(f"    PTR Batch {batch_idx+1}/{len(batches)}: {len(rows)} Tx")
 
         except json.JSONDecodeError:
-            log.warning(f"    PTR S.{pg_idx+1}: JSON-Fehler")
+            consecutive_errors += 1
+            log.warning(f"    PTR Batch {batch_idx+1}: JSON-Fehler ({consecutive_errors}/{_VISION_MAX_ERRORS})")
         except Exception as e:
-            log.warning(f"    PTR S.{pg_idx+1}: {e}")
+            consecutive_errors += 1
+            log.warning(f"    PTR Batch {batch_idx+1}: {e} ({consecutive_errors}/{_VISION_MAX_ERRORS})")
 
     stocks_found = conn.execute(
         "SELECT COUNT(*) FROM trump_holdings WHERE pdf_url=?", (pdf_url,)
@@ -2074,60 +2101,79 @@ def check_oge_alerts() -> None:
     alert_cutoff = (now_utc() - timedelta(days=OGE_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
     new_count = 0
 
+    # Neue PDFs identifizieren
+    new_items = []
     for item in links:
-        pdf_url  = item["pdf_url"]
-        source   = item["source"]
-        pdf_date = _oge_date_from_url(pdf_url)
-        send_alert = not (pdf_date and pdf_date < alert_cutoff)  # kein Alert für alte PDFs
-
         exists = conn.execute(
-            "SELECT 1 FROM oge_ptrs WHERE pdf_url=?", (pdf_url,)
+            "SELECT 1 FROM oge_ptrs WHERE pdf_url=?", (item["pdf_url"],)
         ).fetchone()
-        if exists:
-            continue  # bereits verarbeitet
+        if not exists:
+            new_items.append(item)
 
-        log.info("Neues OGE PDF%s: %s…",
-                 "" if send_alert else " (historisch, kein Alert)", pdf_url[:80])
+    if not new_items:
+        log.info("OGE: Keine neuen PTR-Berichte")
+        return
 
-        # 278e (jährliche Disclosure) vs. 278-T (Periodic Transaction Report)
-        if _is_278e_pdf(pdf_url):
-            year_m = re.search(r'/(\d{4})/', pdf_url)
-            year   = int(year_m.group(1)) if year_m else now_utc().year
-            n = parse_278e_via_claude_vision(pdf_url, year)
-            conn.execute(
-                "INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
-                (pdf_url, source, n, now_utc().isoformat()),
-            )
-            conn.commit()
-            if n and send_alert:
-                new_count += 1
-            continue
+    # 278e sequenziell (einmalig, groß), PTRs parallel (viele, klein)
+    ptr_items  = [i for i in new_items if not _is_278e_pdf(i["pdf_url"])]
+    e278_items = [i for i in new_items if     _is_278e_pdf(i["pdf_url"])]
 
-        # PTR: immer parsen (für Holdings-DB), Alert nur wenn aktuell
+    # 278e zuerst (Basis für PTR-Kontext)
+    for item in e278_items:
+        pdf_url = item["pdf_url"]
+        source  = item["source"]
+        log.info("Neues 278e PDF: %s…", pdf_url[:80])
+        year_m = re.search(r'/(\d{4})/', pdf_url)
+        year   = int(year_m.group(1)) if year_m else now_utc().year
+        n = parse_278e_via_claude_vision(pdf_url, year)
+        conn.execute("INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
+                     (pdf_url, source, n, now_utc().isoformat()))
+        conn.commit()
+        if n:
+            new_count += 1
+
+    def _process_ptr(item):
+        """Verarbeitet ein PTR-PDF — läuft parallel."""
+        pdf_url    = item["pdf_url"]
+        source     = item["source"]
+        pdf_date   = _oge_date_from_url(pdf_url)
+        send_alert = not (pdf_date and pdf_date < alert_cutoff)
+        label      = "" if send_alert else " (historisch)"
+        log.info("Neues PTR%s: %s…", label, pdf_url[:70])
+
         transactions = parse_oge_ptr_pdf(pdf_url)
         if not transactions:
-            log.info("  → pdfplumber leer, versuche Claude Vision…")
             transactions = parse_ptr_via_claude_vision(pdf_url)
 
-        conn.execute(
-            "INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
-            (pdf_url, source, len(transactions), now_utc().isoformat()),
-        )
+        conn.execute("INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
+                     (pdf_url, source, len(transactions), now_utc().isoformat()))
         conn.commit()
 
         if not transactions:
-            log.warning("OGE PTR: 0 Transaktionen auch nach Vision — übersprungen: %s", pdf_url)
-            continue
+            log.warning("OGE PTR: 0 Tx nach Vision — übersprungen: %s", pdf_url)
+            return 0
 
         if send_alert:
             send_oge_alert(pdf_url, source, transactions)
-            new_count += 1
+            return 1
         else:
             log.info("  📥 Historischer PTR geparst (%d Tx) — kein Alert", len(transactions))
+            return 0
+
+    # PTRs parallel mit max 3 gleichzeitigen Threads
+    if ptr_items:
+        log.info("OGE: %d PTRs parallel verarbeiten (max 3 gleichzeitig)…", len(ptr_items))
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            futures = {ex.submit(_process_ptr, item): item for item in ptr_items}
+            for fut in as_completed(futures):
+                try:
+                    new_count += fut.result()
+                except Exception as e:
+                    log.warning("PTR Worker Fehler: %s", e)
 
     conn.commit()
     if new_count == 0:
-        log.info("OGE: Keine neuen PTR-Berichte")
+        log.info("OGE: Keine neuen PTR-Berichte (nur historische geparst)")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TRUMP HOLDINGS  (OGE Form 278 – öffentlich)
