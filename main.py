@@ -2537,10 +2537,8 @@ def analyze_and_alert(
         log.info(f"  ⏭️  {ticker} [{priority}] + {confidence} Konfidenz → übersprungen")
         return
 
-    # ── Stufe 0: FinBERT + Marktdaten (günstig, lokal) ───────────────────────
+    # ── Stufe 0: FinBERT (lokal, kostenlos) ──────────────────────────────────
     finbert_sent = get_finbert_sentiment(raw_text)
-    market_data  = fetch_market_data(ticker)
-    market_block = format_market_block(ticker)
     holding_info = trump_holding_info(ticker)
 
     # ── Rate-Limit-Check (vor jedem Sonnet-Call) ─────────────────────────────
@@ -2550,6 +2548,10 @@ def analyze_and_alert(
     # ── Stufe 1: Haiku-Tradability-Screen (nur Medium/Low/Unknown) ───────────
     if priority != "high" and not _haiku_tradeable(ticker, raw_text, finbert_sent):
         return  # High-Priority-Ticker überspringen diesen Screen
+
+    # ── Marktdaten erst NACH Haiku-Screen — spart ~70% der yfinance-Calls ────
+    market_data  = fetch_market_data(ticker)
+    market_block = format_market_block(ticker)
 
     # Konfidenz-Beschreibung für Sonnet-Prompt
     if confidence == "niedrig":
