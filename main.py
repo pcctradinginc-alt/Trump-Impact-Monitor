@@ -1396,25 +1396,35 @@ def parse_oge_ptr_pdf(pdf_url: str, db_conn=None) -> list[dict]:
 
 
 # Ticker-Mapping für häufige Asset-Namen in OGE-PDFs
-_OGE_ASSET_TICKER_MAP = {
-    "apple": "AAPL", "microsoft": "MSFT", "amazon": "AMZN", "alphabet": "GOOGL",
-    "google": "GOOGL", "meta": "META", "nvidia": "NVDA", "tesla": "TSLA",
-    "ibm": "IBM", "intel": "INTC", "amd": "AMD", "boeing": "BA",
-    "lockheed": "LMT", "exxon": "XOM", "jpmorgan": "JPM", "goldman": "GS",
-    "bank of america": "BAC", "costco": "COST", "walmart": "WMT",
-    "pfizer": "PFE", "johnson": "JNJ", "berkshire": "BRK",
-    "palantir": "PLTR", "trump media": "DJT",
-}
-
 def _ticker_from_asset_name(name: str) -> str | None:
+    """
+    Matcht Asset-Namen (Aktien UND Anleihen) gegen entities.json.
+    Gibt den bekannten Ticker zurück wenn ein Firmenname erkannt wird.
+
+    Strategie:
+    1. entities.json company-Namen durchsuchen (zuverlässig, ~7000 Firmen)
+    2. Fallback: exaktes Ticker-Symbol in Klammern suchen, z.B. "(BA)"
+    3. KEIN blindes Regex-Matching mehr → verhindert Phantom-Ticker aus Anleihe-OCR
+
+    Beispiele:
+    "BOEING COMPANY SENIOR NOTES DUE 2031" → BA
+    "APPLE INC COMMON STOCK"              → AAPL
+    "THF BOEING COMPANY PERP 3.3%"        → BA  (OCR-Präfix ignoriert)
+    "OPCA GENERAL TRUST GRANT STREET..."  → None (kein Match → verworfen)
+    """
     low = name.lower()
-    # Direktes Ticker-Symbol (2-5 Großbuchstaben in Klammern oder am Ende)
-    m = re.search(r'\b([A-Z]{2,5})\b', name)
-    if m and m.group(1) not in {"THE", "AND", "FOR", "LLC", "INC", "CORP"}:
+
+    # 1. entities.json company-Namen (längste zuerst für Präzision)
+    for ticker, tiers in ENTITIES.items():
+        for alias in tiers.get("company", []):
+            if alias and len(alias) >= 4 and alias.lower() in low:
+                return ticker.upper()
+
+    # 2. Explizites Symbol in Klammern: "... (BA)" oder "... BA)"
+    m = re.search(r'\(([A-Z]{1,5})\)', name)
+    if m and m.group(1) in ENTITIES:
         return m.group(1)
-    for keyword, ticker in _OGE_ASSET_TICKER_MAP.items():
-        if keyword in low:
-            return ticker
+
     return None
 
 def _save_oge_holdings(transactions: list[dict], pdf_url: str, db_conn=None) -> None:
