@@ -765,132 +765,103 @@ def holdings_html_block() -> str:
           'text-align:left;text-transform:uppercase;letter-spacing:0.06em;"')
     td = 'style="padding:5px 10px 5px 0;font-size:11px;vertical-align:top;border-bottom:1px solid #f5f5f7;"'
 
-    # ── 1. Aktienportfolio: 278e Basis + PTR Deltas ───────────────────────────
-    if snap_rows:
-        # Sortiere nach Wert (größte Position zuerst)
-        sorted_snap = sorted(snap_rows,
-            key=lambda r: _VALUE_SORT_KEY.get(r[2], 9))
+    # ── Aktienportfolio: NUR Positionen mit PTR-Änderung + Zusammenfassung ─────
+    # Geänderte Positionen (haben PTR-Einträge)
+    changed_rows = []
+    for ticker, ptr_row in sorted(ptr_map.items(), key=lambda x: x[1][4] or "", reverse=True):
+        _, asset_name, buys, sells, last_date, history = ptr_row
+        net = buys - sells
+        txs = [x.split("|") for x in (history or "").split(",") if x]
+        last_tx = txs[-1][0] if txs else ""
+        prev_net = sum(1 if t[0]=="KAUF" else -1 if t[0]=="VERKAUF" else 0 for t in txs[:-1])
 
-        stock_html = ""
-        for asset_name, ticker, value_range, income_type, income_amount in sorted_snap:
-            ptr_badge  = _ptr_badge(ticker) if ticker else ""
-            val_color  = "#1d1d1f" if "None" not in (value_range or "") else "#9ca3af"
-            inc_str    = f"{income_type}: {income_amount}" if income_type and income_amount else ""
-            stock_html += (
-                f'<tr>'
-                f'<td {td} style="padding:5px 10px 5px 0;font-size:11px;vertical-align:top;'
-                f'border-bottom:1px solid #f5f5f7;font-weight:600;color:#1d1d1f;">'
-                f'{ticker or "–"}</td>'
-                f'<td {td} style="color:#6e6e73;">{asset_name[:45]}</td>'
-                f'<td {td} style="color:{val_color};white-space:nowrap;">{value_range or "–"}</td>'
-                f'<td {td} style="color:#6e6e73;font-size:10px;">{inc_str}</td>'
-                f'<td {td}>{ptr_badge}</td>'
-                f'</tr>'
-            )
+        if net <= 0:
+            label, bg, fg = "SOLD OUT", "#fee2e2", "#dc2626"
+        elif prev_net <= 0:
+            label, bg, fg = "NEW BUY", "#d1fae5", "#059669"
+        elif last_tx == "KAUF":
+            label, bg, fg = "ADD", "#dbeafe", "#2563eb"
+        elif last_tx == "VERKAUF":
+            label, bg, fg = "REDUCED", "#fef3c7", "#d97706"
+        else:
+            label, bg, fg = "HELD", "#f5f5f7", "#6e6e73"
 
-        snap_label = f"Jahresend {snap_year} · OGE Form 278e"
-        stocks_section = f"""
+        # 278e-Wert wenn vorhanden
+        snap_val = ""
+        if snap_rows:
+            snap_hit = next((r[2] for r in snap_rows if r[1] == ticker), None)
+            snap_val = snap_hit or "nicht in 278e"
+
+        changed_rows.append((ticker, asset_name, label, bg, fg, snap_val, last_date))
+
+    changed_html = ""
+    for ticker, asset_name, label, bg, fg, snap_val, last_date in changed_rows:
+        badge = (f'<span style="background:{bg};color:{fg};font-size:9px;font-weight:700;'
+                 f'padding:2px 5px;border-radius:3px;">{label}</span>')
+        changed_html += (
+            f'<tr style="background:{"#fafffe" if label in ("NEW BUY","ADD") else "#fff8f8" if label in ("SOLD OUT","REDUCED") else "#fff"};">'
+            f'<td {td} style="font-weight:600;color:#1d1d1f;">{ticker}</td>'
+            f'<td {td} style="color:#6e6e73;">{(asset_name or "")[:40]}</td>'
+            f'<td {td} style="color:#9ca3af;font-size:10px;">{snap_val}</td>'
+            f'<td {td} style="color:#9ca3af;font-size:10px;white-space:nowrap;">{last_date or "–"}</td>'
+            f'<td {td}>{badge}</td>'
+            f'</tr>'
+        )
+
+    n_unchanged = len(snap_rows) - len(changed_rows) if snap_rows else 0
+    unchanged_note = (
+        f'<tr><td colspan="5" style="padding:6px 0;font-size:10px;color:#9ca3af;">'
+        f'+ {n_unchanged} weitere Positionen unverändert seit 278e {snap_year}'
+        f'</td></tr>'
+    ) if n_unchanged > 0 else ""
+
+    if not changed_html:
+        changed_html = ('<tr><td colspan="5" style="padding:8px 0;font-size:11px;color:#9ca3af;">'
+                        'Keine PTR-Änderungen bekannt.</td></tr>')
+
+    basis_note = f"Basis: 278e {snap_year} · " if snap_year else ""
+    stocks_section = f"""
 <p style="margin:12px 0 4px;font-size:10px;font-weight:700;color:#6e6e73;
    text-transform:uppercase;letter-spacing:0.08em;">
-  Aktienportfolio · {snap_label}
-  <span style="font-weight:400;text-transform:none;letter-spacing:0;">
-    — sortiert nach Positionsgröße · PTR-Änderungen als Badge
-  </span>
+  Trumps Positionen · {basis_note}Änderungen laut PTR
 </p>
 <table style="border-collapse:collapse;width:100%;margin-top:2px;">
   <thead><tr>
-    <th {th}>Ticker</th><th {th}>Name</th>
-    <th {th}>Wert (Range)</th><th {th}>Einkommen</th>
-    <th {th}>PTR-Delta</th>
+    <th {th}>Ticker</th><th {th}>Asset</th>
+    <th {th}>278e Wert</th><th {th}>PTR Datum</th>
+    <th {th}>Status</th>
   </tr></thead>
-  <tbody>{stock_html}</tbody>
+  <tbody>{changed_html}{unchanged_note}</tbody>
 </table>"""
 
-    else:
-        # Fallback: nur PTR-Daten (noch kein 278e geparst)
-        ptr_only_rows = list(ptr_map.values())
-        ptr_html = ""
-        for _, asset_name, buys, sells, last_date, history in ptr_only_rows:
-            ticker = _
-            badge  = _badge_ptr_only(buys, sells, history)
-            txinfo = f"{buys}× KAUF" + (f", {sells}× VERKAUF" if sells else "")
-            ptr_html += (
-                f'<tr>'
-                f'<td {td} style="font-weight:600;color:#1d1d1f;">{ticker}</td>'
-                f'<td {td} style="color:#6e6e73;">{asset_name[:45]}</td>'
-                f'<td {td}>{badge}</td>'
-                f'<td {td} style="color:#6e6e73;">{txinfo}</td>'
-                f'<td {td} style="color:#6e6e73;white-space:nowrap;">{last_date or "–"}</td>'
-                f'</tr>'
-            )
-        if not ptr_html:
-            ptr_html = ('<tr><td colspan="5" style="padding:10px 0;font-size:12px;color:#9ca3af;">'
-                        '278e noch nicht geparst — wird beim nächsten Run befüllt.</td></tr>')
-        stocks_section = f"""
-<p style="margin:12px 0 4px;font-size:10px;font-weight:700;color:#6e6e73;
-   text-transform:uppercase;letter-spacing:0.08em;">
-  Aktienportfolio · OGE Form 278-T PTR (278e noch ausstehend)
-</p>
-<table style="border-collapse:collapse;width:100%;margin-top:2px;">
-  <thead><tr>
-    <th {th}>Ticker</th><th {th}>Name</th><th {th}>Status</th>
-    <th {th}>Transaktionen</th><th {th}>Letzter Eintrag</th>
-  </tr></thead>
-  <tbody>{ptr_html}</tbody>
-</table>"""
-
-    # ── 2. Strategische Beteiligungen ─────────────────────────────────────────
-    strategic_section = """
-<p style="margin:16px 0 4px;font-size:10px;font-weight:700;color:#6e6e73;
-   text-transform:uppercase;letter-spacing:0.08em;">Strategische Beteiligungen</p>
-<table style="border-collapse:collapse;width:100%;margin-top:2px;"><tbody>
-  <tr>
-    <td style="padding:6px 10px 6px 0;font-size:12px;font-weight:600;color:#1d1d1f;
-        border-bottom:1px solid #f5f5f7;vertical-align:top;">DJT</td>
-    <td style="padding:6px 10px 6px 0;font-size:11px;color:#6e6e73;
-        border-bottom:1px solid #f5f5f7;">Trump Media &amp; Technology Group</td>
-    <td style="padding:6px 10px 6px 0;font-size:11px;color:#1d1d1f;
-        border-bottom:1px solid #f5f5f7;">~57 % / ~114 Mio. Shares</td>
-    <td style="padding:6px 0 6px 0;font-size:11px;color:#6e6e73;
-        border-bottom:1px solid #f5f5f7;white-space:nowrap;">2024-09-20<br>
-      <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000947033&type=4"
-         style="font-size:10px;color:#0071e3;text-decoration:none;">SEC Form 4</a>
-    </td>
-  </tr>
-</tbody></table>"""
-
-    # ── 3. Krypto & DeFi ──────────────────────────────────────────────────────
-    crypto_rows = ""
+    # ── Strategische Beteiligungen + Krypto (kompakt, eine Zeile je) ──────────
+    static_rows = (
+        '<tr>'
+        '<td style="padding:4px 10px 4px 0;font-size:11px;font-weight:600;color:#1d1d1f;border-bottom:1px solid #f5f5f7;">DJT</td>'
+        '<td style="padding:4px 10px 4px 0;font-size:11px;color:#6e6e73;border-bottom:1px solid #f5f5f7;">Trump Media ~57%</td>'
+        '<td style="padding:4px 0;font-size:10px;color:#9ca3af;border-bottom:1px solid #f5f5f7;">SEC Form 4 · 2024-09-20</td>'
+        '</tr>'
+    )
     for h in TRUMP_KNOWN_HOLDINGS:
         if h["type"] in ("Aktie (börsennotiert)", "Aktien-Portfolio"):
             continue
-        crypto_rows += (
+        static_rows += (
             f'<tr>'
-            f'<td style="padding:6px 10px 6px 0;font-size:11px;color:#1d1d1f;'
-            f'border-bottom:1px solid #f5f5f7;vertical-align:top;">'
-            f'<a href="{h["url"]}" style="color:#0071e3;text-decoration:none;">'
-            f'{h["asset"]}</a></td>'
-            f'<td style="padding:6px 10px 6px 0;font-size:11px;color:#6e6e73;'
-            f'border-bottom:1px solid #f5f5f7;">{h["type"]}</td>'
-            f'<td style="padding:6px 10px 6px 0;font-size:11px;color:#1d1d1f;'
-            f'border-bottom:1px solid #f5f5f7;">{h["stake"]}</td>'
-            f'<td style="padding:6px 0;font-size:11px;color:#6e6e73;'
-            f'border-bottom:1px solid #f5f5f7;white-space:nowrap;">{h["disclosed"]}<br>'
-            f'<span style="font-size:10px;">{h["source"]}</span></td>'
+            f'<td style="padding:4px 10px 4px 0;font-size:11px;font-weight:600;color:#1d1d1f;border-bottom:1px solid #f5f5f7;">'
+            f'<a href="{h["url"]}" style="color:#0071e3;text-decoration:none;">{h["asset"][:30]}</a></td>'
+            f'<td style="padding:4px 10px 4px 0;font-size:11px;color:#6e6e73;border-bottom:1px solid #f5f5f7;">{h["stake"][:35]}</td>'
+            f'<td style="padding:4px 0;font-size:10px;color:#9ca3af;border-bottom:1px solid #f5f5f7;">{h["source"]} · {h["disclosed"]}</td>'
             f'</tr>'
         )
-    crypto_section = f"""
-<p style="margin:16px 0 4px;font-size:10px;font-weight:700;color:#6e6e73;
-   text-transform:uppercase;letter-spacing:0.08em;">Krypto &amp; DeFi</p>
+
+    static_section = f"""
+<p style="margin:14px 0 4px;font-size:10px;font-weight:700;color:#6e6e73;
+   text-transform:uppercase;letter-spacing:0.08em;">Strategisch &amp; Krypto</p>
 <table style="border-collapse:collapse;width:100%;margin-top:2px;">
-  <thead><tr>
-    <th {th}>Asset</th><th {th}>Typ</th>
-    <th {th}>Beteiligung</th><th {th}>Offengelegt</th>
-  </tr></thead>
-  <tbody>{crypto_rows}</tbody>
+  <tbody>{static_rows}</tbody>
 </table>"""
 
-    return stocks_section + strategic_section + crypto_section
+    return stocks_section + static_section
 
 
 # ─────────────────────────────────────────────────────────────────────────────
