@@ -53,6 +53,10 @@ watchlist:
     - KTOS
 
   # Nur bei direkter Nennung (Tier-1 oder Tier-2 Match) — kein Tier-3/Claude-Inferenz
+  priority_medium:
+    - FNMA
+    - FMCC
+
   priority_low:
     - WMT
     - TGT

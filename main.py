@@ -2530,7 +2530,8 @@ def analyze_and_alert(
     else:
         priority = "unknown"
 
-    # Low-Priorität: Tier-3/Claude-Inferenz-Treffer sofort verwerfen
+    # Low/Unknown-Priorität: Tier-3/Claude-Inferenz-Treffer verwerfen
+    # Medium-Priorität mit claude-Konfidenz: durchlassen (z.B. FNMA/FMCC)
     if priority in ("low", "unknown") and confidence in ("niedrig", "claude"):
         log.info(f"  ⏭️  {ticker} [{priority}] + {confidence} Konfidenz → übersprungen")
         return

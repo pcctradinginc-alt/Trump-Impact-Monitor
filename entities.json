@@ -1,2572 +1,5399 @@
 {
   "AAPL": {
-    "symbol": ["AAPL"],
-    "company": ["Apple", "Apple Inc", "Tim Cook"],
-    "weak": ["iPhone", "iPad", "MacBook", "App Store", "Apple Watch", "AirPods"]
+    "symbol": [
+      "AAPL"
+    ],
+    "company": [
+      "Apple",
+      "Apple Inc",
+      "Tim Cook"
+    ],
+    "weak": [
+      "iPhone",
+      "iPad",
+      "MacBook",
+      "App Store",
+      "Apple Watch",
+      "AirPods"
+    ]
   },
   "MSFT": {
-    "symbol": ["MSFT"],
-    "company": ["Microsoft", "Microsoft Corporation", "Satya Nadella", "Azure"],
-    "weak": ["Windows", "OpenAI", "Copilot", "Xbox", "LinkedIn"]
+    "symbol": [
+      "MSFT"
+    ],
+    "company": [
+      "Microsoft",
+      "Microsoft Corporation",
+      "Satya Nadella",
+      "Azure"
+    ],
+    "weak": [
+      "Windows",
+      "OpenAI",
+      "Copilot",
+      "Xbox",
+      "LinkedIn"
+    ]
   },
   "NVDA": {
-    "symbol": ["NVDA"],
-    "company": ["Nvidia", "Nvidia Corporation", "Jensen Huang"],
-    "weak": ["GeForce", "H100", "H200", "Blackwell", "Hopper", "CUDA"]
+    "symbol": [
+      "NVDA"
+    ],
+    "company": [
+      "Nvidia",
+      "Nvidia Corporation",
+      "Jensen Huang"
+    ],
+    "weak": [
+      "GeForce",
+      "H100",
+      "H200",
+      "Blackwell",
+      "Hopper",
+      "CUDA"
+    ]
   },
   "AMZN": {
-    "symbol": ["AMZN"],
-    "company": ["Amazon", "Jeff Bezos", "Andy Jassy", "AWS", "Amazon Web Services"],
-    "weak": ["Amazon Prime", "Alexa", "Whole Foods", "Ring doorbell"]
+    "symbol": [
+      "AMZN"
+    ],
+    "company": [
+      "Amazon",
+      "Jeff Bezos",
+      "Andy Jassy",
+      "AWS",
+      "Amazon Web Services"
+    ],
+    "weak": [
+      "Amazon Prime",
+      "Alexa",
+      "Whole Foods",
+      "Ring doorbell"
+    ]
   },
   "META": {
-    "symbol": ["META"],
-    "company": ["Meta", "Meta Platforms", "Mark Zuckerberg", "Zuckerberg", "Facebook", "Instagram", "WhatsApp"],
-    "weak": ["Threads", "Llama", "Ray-Ban Meta"]
+    "symbol": [
+      "META"
+    ],
+    "company": [
+      "Meta",
+      "Meta Platforms",
+      "Mark Zuckerberg",
+      "Zuckerberg",
+      "Facebook",
+      "Instagram",
+      "WhatsApp"
+    ],
+    "weak": [
+      "Threads",
+      "Llama",
+      "Ray-Ban Meta"
+    ]
   },
   "GOOGL": {
-    "symbol": ["GOOGL"],
-    "company": ["Google", "Alphabet", "Sundar Pichai", "YouTube", "Google Cloud", "DeepMind"],
-    "weak": ["Android", "Chrome", "Gemini", "Google Maps", "Google Search"]
+    "symbol": [
+      "GOOGL"
+    ],
+    "company": [
+      "Google",
+      "Alphabet",
+      "Sundar Pichai",
+      "YouTube",
+      "Google Cloud",
+      "DeepMind"
+    ],
+    "weak": [
+      "Android",
+      "Chrome",
+      "Gemini",
+      "Google Maps",
+      "Google Search"
+    ]
   },
   "TSLA": {
-    "symbol": ["TSLA"],
-    "company": ["Tesla", "Tesla Motors", "Tesla Energy", "Elon Musk"],
-    "weak": ["Model Y", "Model 3", "Cybertruck", "Twitter", "X platform", "xAI", "Grok", "Powerwall"]
+    "symbol": [
+      "TSLA"
+    ],
+    "company": [
+      "Tesla",
+      "Tesla Motors",
+      "Tesla Energy",
+      "Elon Musk"
+    ],
+    "weak": [
+      "Model Y",
+      "Model 3",
+      "Cybertruck",
+      "Twitter",
+      "X platform",
+      "xAI",
+      "Grok",
+      "Powerwall"
+    ]
   },
   "AVGO": {
-    "symbol": ["AVGO"],
-    "company": ["Broadcom", "Broadcom Inc", "Hock Tan"],
+    "symbol": [
+      "AVGO"
+    ],
+    "company": [
+      "Broadcom",
+      "Broadcom Inc",
+      "Hock Tan"
+    ],
     "weak": []
   },
   "IBM": {
-    "symbol": ["IBM"],
-    "company": ["International Business Machines", "Arvind Krishna", "IBM Corporation"],
-    "weak": ["Watson AI", "IBM Cloud"]
+    "symbol": [
+      "IBM"
+    ],
+    "company": [
+      "International Business Machines",
+      "Arvind Krishna",
+      "IBM Corporation"
+    ],
+    "weak": [
+      "Watson AI",
+      "IBM Cloud"
+    ]
   },
   "ACN": {
-    "symbol": ["ACN"],
-    "company": ["Accenture", "Accenture plc", "Julie Sweet"],
+    "symbol": [
+      "ACN"
+    ],
+    "company": [
+      "Accenture",
+      "Accenture plc",
+      "Julie Sweet"
+    ],
     "weak": []
   },
   "INTU": {
-    "symbol": ["INTU"],
-    "company": ["Intuit", "Sasan Goodarzi"],
-    "weak": ["TurboTax", "QuickBooks"]
+    "symbol": [
+      "INTU"
+    ],
+    "company": [
+      "Intuit",
+      "Sasan Goodarzi"
+    ],
+    "weak": [
+      "TurboTax",
+      "QuickBooks"
+    ]
   },
   "NOW": {
     "symbol": [],
-    "company": ["ServiceNow", "Bill McDermott ServiceNow"],
+    "company": [
+      "ServiceNow",
+      "Bill McDermott ServiceNow"
+    ],
     "weak": []
   },
   "SNOW": {
-    "symbol": ["SNOW"],
-    "company": ["Snowflake", "Snowflake Inc", "Sridhar Ramaswamy"],
+    "symbol": [
+      "SNOW"
+    ],
+    "company": [
+      "Snowflake",
+      "Snowflake Inc",
+      "Sridhar Ramaswamy"
+    ],
     "weak": []
   },
   "VEEV": {
-    "symbol": ["VEEV"],
-    "company": ["Veeva Systems", "Veeva"],
+    "symbol": [
+      "VEEV"
+    ],
+    "company": [
+      "Veeva Systems",
+      "Veeva"
+    ],
     "weak": []
   },
   "NET": {
     "symbol": [],
-    "company": ["Cloudflare", "Cloudflare Inc", "Matthew Prince Cloudflare"],
+    "company": [
+      "Cloudflare",
+      "Cloudflare Inc",
+      "Matthew Prince Cloudflare"
+    ],
     "weak": []
   },
   "FISV": {
-    "symbol": ["FISV"],
-    "company": ["Fiserv", "Fiserv Inc", "Frank Bisignano"],
+    "symbol": [
+      "FISV"
+    ],
+    "company": [
+      "Fiserv",
+      "Fiserv Inc",
+      "Frank Bisignano"
+    ],
     "weak": []
   },
   "FIS": {
-    "symbol": ["FIS"],
-    "company": ["Fidelity National Information Services", "Stephanie Ferris"],
+    "symbol": [
+      "FIS"
+    ],
+    "company": [
+      "Fidelity National Information Services",
+      "Stephanie Ferris"
+    ],
     "weak": []
   },
   "GPN": {
-    "symbol": ["GPN"],
-    "company": ["Global Payments"],
+    "symbol": [
+      "GPN"
+    ],
+    "company": [
+      "Global Payments"
+    ],
     "weak": []
   },
   "HPQ": {
-    "symbol": ["HPQ"],
-    "company": ["HP Inc", "Hewlett Packard", "Enrique Lores"],
+    "symbol": [
+      "HPQ"
+    ],
+    "company": [
+      "HP Inc",
+      "Hewlett Packard",
+      "Enrique Lores"
+    ],
     "weak": []
   },
   "HPE": {
-    "symbol": ["HPE"],
-    "company": ["Hewlett Packard Enterprise", "Antonio Neri"],
+    "symbol": [
+      "HPE"
+    ],
+    "company": [
+      "Hewlett Packard Enterprise",
+      "Antonio Neri"
+    ],
     "weak": []
   },
   "DELL": {
-    "symbol": ["DELL"],
-    "company": ["Dell Technologies", "Dell Inc", "Michael Dell"],
+    "symbol": [
+      "DELL"
+    ],
+    "company": [
+      "Dell Technologies",
+      "Dell Inc",
+      "Michael Dell"
+    ],
     "weak": []
   },
   "WDC": {
-    "symbol": ["WDC"],
-    "company": ["Western Digital", "Western Digital Corporation"],
+    "symbol": [
+      "WDC"
+    ],
+    "company": [
+      "Western Digital",
+      "Western Digital Corporation"
+    ],
     "weak": []
   },
   "STX": {
-    "symbol": ["STX"],
-    "company": ["Seagate", "Seagate Technology"],
+    "symbol": [
+      "STX"
+    ],
+    "company": [
+      "Seagate",
+      "Seagate Technology"
+    ],
     "weak": []
   },
   "NTAP": {
-    "symbol": ["NTAP"],
-    "company": ["NetApp", "NetApp Inc"],
+    "symbol": [
+      "NTAP"
+    ],
+    "company": [
+      "NetApp",
+      "NetApp Inc"
+    ],
     "weak": []
   },
   "AKAM": {
-    "symbol": ["AKAM"],
-    "company": ["Akamai", "Akamai Technologies"],
+    "symbol": [
+      "AKAM"
+    ],
+    "company": [
+      "Akamai",
+      "Akamai Technologies"
+    ],
     "weak": []
   },
   "GLW": {
-    "symbol": ["GLW"],
-    "company": ["Corning", "Corning Inc"],
-    "weak": ["Gorilla Glass"]
+    "symbol": [
+      "GLW"
+    ],
+    "company": [
+      "Corning",
+      "Corning Inc"
+    ],
+    "weak": [
+      "Gorilla Glass"
+    ]
   },
   "TEL": {
-    "symbol": ["TEL"],
-    "company": ["TE Connectivity"],
+    "symbol": [
+      "TEL"
+    ],
+    "company": [
+      "TE Connectivity"
+    ],
     "weak": []
   },
   "APH": {
-    "symbol": ["APH"],
-    "company": ["Amphenol", "Amphenol Corporation"],
+    "symbol": [
+      "APH"
+    ],
+    "company": [
+      "Amphenol",
+      "Amphenol Corporation"
+    ],
     "weak": []
   },
   "MPWR": {
-    "symbol": ["MPWR"],
-    "company": ["Monolithic Power Systems", "Monolithic Power"],
+    "symbol": [
+      "MPWR"
+    ],
+    "company": [
+      "Monolithic Power Systems",
+      "Monolithic Power"
+    ],
     "weak": []
   },
   "TER": {
-    "symbol": ["TER"],
-    "company": ["Teradyne", "Teradyne Inc"],
+    "symbol": [
+      "TER"
+    ],
+    "company": [
+      "Teradyne",
+      "Teradyne Inc"
+    ],
     "weak": []
   },
   "KEYS": {
-    "symbol": ["KEYS"],
-    "company": ["Keysight Technologies"],
+    "symbol": [
+      "KEYS"
+    ],
+    "company": [
+      "Keysight Technologies"
+    ],
     "weak": []
   },
   "MSCI": {
-    "symbol": ["MSCI"],
-    "company": ["MSCI Inc", "Morgan Stanley Capital International"],
+    "symbol": [
+      "MSCI"
+    ],
+    "company": [
+      "MSCI Inc",
+      "Morgan Stanley Capital International"
+    ],
     "weak": []
   },
   "IT": {
     "symbol": [],
-    "company": ["Gartner", "Gartner Inc"],
-    "weak": ["Gartner research"]
+    "company": [
+      "Gartner",
+      "Gartner Inc"
+    ],
+    "weak": [
+      "Gartner research"
+    ]
   },
   "BR": {
     "symbol": [],
-    "company": ["Broadridge Financial", "Broadridge"],
+    "company": [
+      "Broadridge Financial",
+      "Broadridge"
+    ],
     "weak": []
   },
   "JKHY": {
-    "symbol": ["JKHY"],
-    "company": ["Jack Henry & Associates", "Jack Henry"],
+    "symbol": [
+      "JKHY"
+    ],
+    "company": [
+      "Jack Henry & Associates",
+      "Jack Henry"
+    ],
     "weak": []
   },
   "GDDY": {
-    "symbol": ["GDDY"],
-    "company": ["GoDaddy", "GoDaddy Inc"],
+    "symbol": [
+      "GDDY"
+    ],
+    "company": [
+      "GoDaddy",
+      "GoDaddy Inc"
+    ],
     "weak": []
   },
   "PAYC": {
-    "symbol": ["PAYC"],
-    "company": ["Paycom", "Paycom Software"],
+    "symbol": [
+      "PAYC"
+    ],
+    "company": [
+      "Paycom",
+      "Paycom Software"
+    ],
     "weak": []
   },
   "EPAM": {
-    "symbol": ["EPAM"],
-    "company": ["EPAM Systems"],
+    "symbol": [
+      "EPAM"
+    ],
+    "company": [
+      "EPAM Systems"
+    ],
     "weak": []
   },
   "FFIV": {
-    "symbol": ["FFIV"],
-    "company": ["F5 Networks", "F5 Inc"],
+    "symbol": [
+      "FFIV"
+    ],
+    "company": [
+      "F5 Networks",
+      "F5 Inc"
+    ],
     "weak": []
   },
   "CDW": {
-    "symbol": ["CDW"],
-    "company": ["CDW Corporation"],
+    "symbol": [
+      "CDW"
+    ],
+    "company": [
+      "CDW Corporation"
+    ],
     "weak": []
   },
   "ADBE": {
-    "symbol": ["ADBE"],
-    "company": ["Adobe", "Adobe Inc"],
-    "weak": ["Photoshop", "Acrobat", "Creative Cloud"]
+    "symbol": [
+      "ADBE"
+    ],
+    "company": [
+      "Adobe",
+      "Adobe Inc"
+    ],
+    "weak": [
+      "Photoshop",
+      "Acrobat",
+      "Creative Cloud"
+    ]
   },
   "CRM": {
-    "symbol": ["CRM"],
-    "company": ["Salesforce", "Salesforce Inc", "Marc Benioff"],
+    "symbol": [
+      "CRM"
+    ],
+    "company": [
+      "Salesforce",
+      "Salesforce Inc",
+      "Marc Benioff"
+    ],
     "weak": []
   },
   "ORCL": {
-    "symbol": ["ORCL"],
-    "company": ["Oracle", "Oracle Corporation", "Larry Ellison"],
+    "symbol": [
+      "ORCL"
+    ],
+    "company": [
+      "Oracle",
+      "Oracle Corporation",
+      "Larry Ellison"
+    ],
     "weak": []
   },
   "PANW": {
-    "symbol": ["PANW"],
-    "company": ["Palo Alto Networks", "Nikesh Arora"],
+    "symbol": [
+      "PANW"
+    ],
+    "company": [
+      "Palo Alto Networks",
+      "Nikesh Arora"
+    ],
     "weak": []
   },
   "CRWD": {
-    "symbol": ["CRWD"],
-    "company": ["CrowdStrike", "CrowdStrike Holdings", "George Kurtz"],
+    "symbol": [
+      "CRWD"
+    ],
+    "company": [
+      "CrowdStrike",
+      "CrowdStrike Holdings",
+      "George Kurtz"
+    ],
     "weak": []
   },
   "FTNT": {
-    "symbol": ["FTNT"],
-    "company": ["Fortinet", "Fortinet Inc"],
+    "symbol": [
+      "FTNT"
+    ],
+    "company": [
+      "Fortinet",
+      "Fortinet Inc"
+    ],
     "weak": []
   },
   "CDNS": {
-    "symbol": ["CDNS"],
-    "company": ["Cadence Design Systems", "Cadence Design"],
+    "symbol": [
+      "CDNS"
+    ],
+    "company": [
+      "Cadence Design Systems",
+      "Cadence Design"
+    ],
     "weak": []
   },
   "SNPS": {
-    "symbol": ["SNPS"],
-    "company": ["Synopsys", "Synopsys Inc"],
+    "symbol": [
+      "SNPS"
+    ],
+    "company": [
+      "Synopsys",
+      "Synopsys Inc"
+    ],
     "weak": []
   },
   "ANSS": {
-    "symbol": ["ANSS"],
-    "company": ["ANSYS", "Ansys Inc"],
+    "symbol": [
+      "ANSS"
+    ],
+    "company": [
+      "ANSYS",
+      "Ansys Inc"
+    ],
     "weak": []
   },
   "ZS": {
     "symbol": [],
-    "company": ["Zscaler", "Zscaler Inc"],
+    "company": [
+      "Zscaler",
+      "Zscaler Inc"
+    ],
     "weak": []
   },
   "PLTR": {
-    "symbol": ["PLTR"],
-    "company": ["Palantir", "Palantir Technologies", "Alex Karp"],
-    "weak": ["Peter Thiel"]
+    "symbol": [
+      "PLTR"
+    ],
+    "company": [
+      "Palantir",
+      "Palantir Technologies",
+      "Alex Karp"
+    ],
+    "weak": [
+      "Peter Thiel"
+    ]
   },
   "SMCI": {
-    "symbol": ["SMCI"],
-    "company": ["Super Micro Computer", "SuperMicro"],
+    "symbol": [
+      "SMCI"
+    ],
+    "company": [
+      "Super Micro Computer",
+      "SuperMicro"
+    ],
     "weak": []
   },
   "ARM": {
-    "symbol": ["ARM"],
-    "company": ["Arm Holdings"],
-    "weak": ["Arm chip architecture", "ARM architecture"]
+    "symbol": [
+      "ARM"
+    ],
+    "company": [
+      "Arm Holdings"
+    ],
+    "weak": [
+      "Arm chip architecture",
+      "ARM architecture"
+    ]
   },
   "DDOG": {
-    "symbol": ["DDOG"],
-    "company": ["Datadog", "Datadog Inc"],
+    "symbol": [
+      "DDOG"
+    ],
+    "company": [
+      "Datadog",
+      "Datadog Inc"
+    ],
     "weak": []
   },
   "WDAY": {
-    "symbol": ["WDAY"],
-    "company": ["Workday", "Workday Inc"],
+    "symbol": [
+      "WDAY"
+    ],
+    "company": [
+      "Workday",
+      "Workday Inc"
+    ],
     "weak": []
   },
   "TTD": {
-    "symbol": ["TTD"],
-    "company": ["The Trade Desk", "Jeff Green Trade Desk"],
+    "symbol": [
+      "TTD"
+    ],
+    "company": [
+      "The Trade Desk",
+      "Jeff Green Trade Desk"
+    ],
     "weak": []
   },
   "TEAM": {
-    "symbol": ["TEAM"],
-    "company": ["Atlassian"],
-    "weak": ["Jira", "Confluence", "Trello"]
+    "symbol": [
+      "TEAM"
+    ],
+    "company": [
+      "Atlassian"
+    ],
+    "weak": [
+      "Jira",
+      "Confluence",
+      "Trello"
+    ]
   },
   "UBER": {
-    "symbol": ["UBER"],
-    "company": ["Uber", "Uber Technologies", "Dara Khosrowshahi"],
+    "symbol": [
+      "UBER"
+    ],
+    "company": [
+      "Uber",
+      "Uber Technologies",
+      "Dara Khosrowshahi"
+    ],
     "weak": []
   },
   "PYPL": {
-    "symbol": ["PYPL"],
-    "company": ["PayPal", "PayPal Holdings"],
-    "weak": ["Venmo"]
+    "symbol": [
+      "PYPL"
+    ],
+    "company": [
+      "PayPal",
+      "PayPal Holdings"
+    ],
+    "weak": [
+      "Venmo"
+    ]
   },
   "SNAP": {
-    "symbol": ["SNAP"],
-    "company": ["Snap Inc", "Snapchat"],
+    "symbol": [
+      "SNAP"
+    ],
+    "company": [
+      "Snap Inc",
+      "Snapchat"
+    ],
     "weak": []
   },
   "MELI": {
-    "symbol": ["MELI"],
-    "company": ["MercadoLibre", "Mercado Libre"],
+    "symbol": [
+      "MELI"
+    ],
+    "company": [
+      "MercadoLibre",
+      "Mercado Libre"
+    ],
     "weak": []
   },
   "BKNG": {
-    "symbol": ["BKNG"],
-    "company": ["Booking Holdings", "Booking.com", "Priceline"],
+    "symbol": [
+      "BKNG"
+    ],
+    "company": [
+      "Booking Holdings",
+      "Booking.com",
+      "Priceline"
+    ],
     "weak": []
   },
   "ABNB": {
-    "symbol": ["ABNB"],
-    "company": ["Airbnb", "Brian Chesky"],
+    "symbol": [
+      "ABNB"
+    ],
+    "company": [
+      "Airbnb",
+      "Brian Chesky"
+    ],
     "weak": []
   },
   "EXPE": {
-    "symbol": ["EXPE"],
-    "company": ["Expedia", "Expedia Group"],
+    "symbol": [
+      "EXPE"
+    ],
+    "company": [
+      "Expedia",
+      "Expedia Group"
+    ],
     "weak": []
   },
   "TTWO": {
-    "symbol": ["TTWO"],
-    "company": ["Take-Two Interactive", "Rockstar Games", "2K Games"],
-    "weak": ["Grand Theft Auto", "GTA"]
+    "symbol": [
+      "TTWO"
+    ],
+    "company": [
+      "Take-Two Interactive",
+      "Rockstar Games",
+      "2K Games"
+    ],
+    "weak": [
+      "Grand Theft Auto",
+      "GTA"
+    ]
   },
   "EA": {
     "symbol": [],
-    "company": ["Electronic Arts", "Andrew Wilson EA"],
-    "weak": ["EA Games", "FIFA EA", "Madden NFL"]
+    "company": [
+      "Electronic Arts",
+      "Andrew Wilson EA"
+    ],
+    "weak": [
+      "EA Games",
+      "FIFA EA",
+      "Madden NFL"
+    ]
   },
   "NTES": {
-    "symbol": ["NTES"],
-    "company": ["NetEase", "NetEase Inc"],
+    "symbol": [
+      "NTES"
+    ],
+    "company": [
+      "NetEase",
+      "NetEase Inc"
+    ],
     "weak": []
   },
   "VRSK": {
-    "symbol": ["VRSK"],
-    "company": ["Verisk Analytics", "Verisk"],
+    "symbol": [
+      "VRSK"
+    ],
+    "company": [
+      "Verisk Analytics",
+      "Verisk"
+    ],
     "weak": []
   },
   "CTSH": {
-    "symbol": ["CTSH"],
-    "company": ["Cognizant", "Cognizant Technology"],
+    "symbol": [
+      "CTSH"
+    ],
+    "company": [
+      "Cognizant",
+      "Cognizant Technology"
+    ],
     "weak": []
   },
   "PAYX": {
-    "symbol": ["PAYX"],
-    "company": ["Paychex", "Paychex Inc"],
+    "symbol": [
+      "PAYX"
+    ],
+    "company": [
+      "Paychex",
+      "Paychex Inc"
+    ],
     "weak": []
   },
   "ADP": {
-    "symbol": ["ADP"],
-    "company": ["ADP", "Automatic Data Processing"],
+    "symbol": [
+      "ADP"
+    ],
+    "company": [
+      "ADP",
+      "Automatic Data Processing"
+    ],
     "weak": []
   },
   "CSGP": {
-    "symbol": ["CSGP"],
-    "company": ["CoStar Group", "CoStar"],
+    "symbol": [
+      "CSGP"
+    ],
+    "company": [
+      "CoStar Group",
+      "CoStar"
+    ],
     "weak": []
   },
   "ODFL": {
-    "symbol": ["ODFL"],
-    "company": ["Old Dominion Freight", "Old Dominion"],
+    "symbol": [
+      "ODFL"
+    ],
+    "company": [
+      "Old Dominion Freight",
+      "Old Dominion"
+    ],
     "weak": []
   },
   "FAST": {
     "symbol": [],
-    "company": ["Fastenal", "Fastenal Company"],
+    "company": [
+      "Fastenal",
+      "Fastenal Company"
+    ],
     "weak": []
   },
   "QCOM": {
-    "symbol": ["QCOM"],
-    "company": ["Qualcomm", "Qualcomm Inc"],
-    "weak": ["Snapdragon"]
+    "symbol": [
+      "QCOM"
+    ],
+    "company": [
+      "Qualcomm",
+      "Qualcomm Inc"
+    ],
+    "weak": [
+      "Snapdragon"
+    ]
   },
   "INTC": {
-    "symbol": ["INTC"],
-    "company": ["Intel", "Intel Corporation", "Lip-Bu Tan"],
+    "symbol": [
+      "INTC"
+    ],
+    "company": [
+      "Intel",
+      "Intel Corporation",
+      "Lip-Bu Tan"
+    ],
     "weak": []
   },
   "AMD": {
-    "symbol": ["AMD"],
-    "company": ["Advanced Micro Devices", "Lisa Su"],
+    "symbol": [
+      "AMD"
+    ],
+    "company": [
+      "Advanced Micro Devices",
+      "Lisa Su"
+    ],
     "weak": []
   },
   "TXN": {
-    "symbol": ["TXN"],
-    "company": ["Texas Instruments"],
+    "symbol": [
+      "TXN"
+    ],
+    "company": [
+      "Texas Instruments"
+    ],
     "weak": []
   },
   "MU": {
-    "symbol": ["MU"],
-    "company": ["Micron", "Micron Technology"],
+    "symbol": [
+      "MU"
+    ],
+    "company": [
+      "Micron",
+      "Micron Technology"
+    ],
     "weak": []
   },
   "AMAT": {
-    "symbol": ["AMAT"],
-    "company": ["Applied Materials"],
+    "symbol": [
+      "AMAT"
+    ],
+    "company": [
+      "Applied Materials"
+    ],
     "weak": []
   },
   "LRCX": {
-    "symbol": ["LRCX"],
-    "company": ["Lam Research", "Lam Research Corporation"],
+    "symbol": [
+      "LRCX"
+    ],
+    "company": [
+      "Lam Research",
+      "Lam Research Corporation"
+    ],
     "weak": []
   },
   "KLAC": {
-    "symbol": ["KLAC"],
-    "company": ["KLA Corporation", "KLA Corp"],
+    "symbol": [
+      "KLAC"
+    ],
+    "company": [
+      "KLA Corporation",
+      "KLA Corp"
+    ],
     "weak": []
   },
   "MRVL": {
-    "symbol": ["MRVL"],
-    "company": ["Marvell Technology", "Marvell"],
+    "symbol": [
+      "MRVL"
+    ],
+    "company": [
+      "Marvell Technology",
+      "Marvell"
+    ],
     "weak": []
   },
   "ADI": {
-    "symbol": ["ADI"],
-    "company": ["Analog Devices", "Analog Devices Inc"],
+    "symbol": [
+      "ADI"
+    ],
+    "company": [
+      "Analog Devices",
+      "Analog Devices Inc"
+    ],
     "weak": []
   },
   "NXPI": {
-    "symbol": ["NXPI"],
-    "company": ["NXP Semiconductors", "NXP"],
+    "symbol": [
+      "NXPI"
+    ],
+    "company": [
+      "NXP Semiconductors",
+      "NXP"
+    ],
     "weak": []
   },
   "ON": {
     "symbol": [],
-    "company": ["ON Semiconductor", "onsemi"],
+    "company": [
+      "ON Semiconductor",
+      "onsemi"
+    ],
     "weak": []
   },
   "ASML": {
-    "symbol": ["ASML"],
-    "company": ["ASML Holding"],
-    "weak": ["extreme ultraviolet lithography", "EUV lithography"]
+    "symbol": [
+      "ASML"
+    ],
+    "company": [
+      "ASML Holding"
+    ],
+    "weak": [
+      "extreme ultraviolet lithography",
+      "EUV lithography"
+    ]
   },
   "TSM": {
-    "symbol": ["TSM"],
-    "company": ["TSMC", "Taiwan Semiconductor", "Taiwan Semiconductor Manufacturing"],
+    "symbol": [
+      "TSM"
+    ],
+    "company": [
+      "TSMC",
+      "Taiwan Semiconductor",
+      "Taiwan Semiconductor Manufacturing"
+    ],
     "weak": []
   },
   "COIN": {
-    "symbol": ["COIN"],
-    "company": ["Coinbase", "Coinbase Global", "Brian Armstrong"],
+    "symbol": [
+      "COIN"
+    ],
+    "company": [
+      "Coinbase",
+      "Coinbase Global",
+      "Brian Armstrong"
+    ],
     "weak": []
   },
   "MSTR": {
-    "symbol": ["MSTR"],
-    "company": ["MicroStrategy", "Michael Saylor", "Saylor", "Strategy Inc"],
+    "symbol": [
+      "MSTR"
+    ],
+    "company": [
+      "MicroStrategy",
+      "Michael Saylor",
+      "Saylor",
+      "Strategy Inc"
+    ],
     "weak": []
   },
   "HOOD": {
-    "symbol": ["HOOD"],
-    "company": ["Robinhood", "Robinhood Markets", "Vlad Tenev"],
+    "symbol": [
+      "HOOD"
+    ],
+    "company": [
+      "Robinhood",
+      "Robinhood Markets",
+      "Vlad Tenev"
+    ],
     "weak": []
   },
   "MARA": {
-    "symbol": ["MARA"],
-    "company": ["Marathon Digital", "Marathon Holdings"],
+    "symbol": [
+      "MARA"
+    ],
+    "company": [
+      "Marathon Digital",
+      "Marathon Holdings"
+    ],
     "weak": []
   },
   "RIOT": {
-    "symbol": ["RIOT"],
-    "company": ["Riot Platforms"],
-    "weak": ["Riot Blockchain"]
+    "symbol": [
+      "RIOT"
+    ],
+    "company": [
+      "Riot Platforms"
+    ],
+    "weak": [
+      "Riot Blockchain"
+    ]
   },
   "BTC": {
-    "symbol": ["BTC"],
-    "company": ["Bitcoin"],
-    "weak": ["satoshi", "halving", "bitcoin miner", "proof of work"]
+    "symbol": [
+      "BTC"
+    ],
+    "company": [
+      "Bitcoin"
+    ],
+    "weak": [
+      "satoshi",
+      "halving",
+      "bitcoin miner",
+      "proof of work"
+    ]
   },
   "ETH": {
-    "symbol": ["ETH"],
-    "company": ["Ethereum"],
-    "weak": ["Ether cryptocurrency", "smart contract ETH"]
+    "symbol": [
+      "ETH"
+    ],
+    "company": [
+      "Ethereum"
+    ],
+    "weak": [
+      "Ether cryptocurrency",
+      "smart contract ETH"
+    ]
   },
   "DJT": {
-    "symbol": [],
-    "company": ["Trump Media", "Trump Media & Technology", "Trump Media and Technology", "TMTG"],
-    "weak": ["Truth Social stock", "Trump Media stock", "DJT stock", "DJT share"]
+    "symbol": [
+      "DJT"
+    ],
+    "company": [
+      "Trump Media",
+      "Trump Media & Technology",
+      "Trump Media and Technology",
+      "TMTG"
+    ],
+    "weak": [
+      "Truth Social platform"
+    ]
   },
   "PHUN": {
-    "symbol": ["PHUN"],
-    "company": ["Phunware"],
+    "symbol": [
+      "PHUN"
+    ],
+    "company": [
+      "Phunware"
+    ],
     "weak": []
   },
   "BRK": {
-    "symbol": ["BRK"],
-    "company": ["Berkshire Hathaway", "Warren Buffett", "Buffett"],
+    "symbol": [
+      "BRK"
+    ],
+    "company": [
+      "Berkshire Hathaway",
+      "Warren Buffett",
+      "Buffett"
+    ],
     "weak": []
   },
   "JPM": {
-    "symbol": ["JPM"],
-    "company": ["JPMorgan", "JP Morgan", "JPMorgan Chase", "Jamie Dimon"],
+    "symbol": [
+      "JPM"
+    ],
+    "company": [
+      "JPMorgan",
+      "JP Morgan",
+      "JPMorgan Chase",
+      "Jamie Dimon"
+    ],
     "weak": []
   },
   "GS": {
-    "symbol": ["GS"],
-    "company": ["Goldman Sachs", "Goldman"],
+    "symbol": [
+      "GS"
+    ],
+    "company": [
+      "Goldman Sachs",
+      "Goldman"
+    ],
     "weak": []
   },
   "BAC": {
-    "symbol": ["BAC"],
-    "company": ["Bank of America", "BofA", "Brian Moynihan"],
+    "symbol": [
+      "BAC"
+    ],
+    "company": [
+      "Bank of America",
+      "BofA",
+      "Brian Moynihan"
+    ],
     "weak": []
   },
   "WFC": {
-    "symbol": ["WFC"],
-    "company": ["Wells Fargo", "Charlie Scharf"],
+    "symbol": [
+      "WFC"
+    ],
+    "company": [
+      "Wells Fargo",
+      "Charlie Scharf"
+    ],
     "weak": []
   },
   "C": {
     "symbol": [],
-    "company": ["Citigroup", "Citi", "Citibank", "Jane Fraser"],
+    "company": [
+      "Citigroup",
+      "Citi",
+      "Citibank",
+      "Jane Fraser"
+    ],
     "weak": []
   },
   "MS": {
     "symbol": [],
-    "company": ["Morgan Stanley", "Ted Pick"],
+    "company": [
+      "Morgan Stanley",
+      "Ted Pick"
+    ],
     "weak": []
   },
   "BLK": {
-    "symbol": ["BLK"],
-    "company": ["BlackRock", "BlackRock Inc", "Larry Fink"],
+    "symbol": [
+      "BLK"
+    ],
+    "company": [
+      "BlackRock",
+      "BlackRock Inc",
+      "Larry Fink"
+    ],
     "weak": []
   },
   "V": {
     "symbol": [],
-    "company": ["Visa", "Visa Inc", "Visa network"],
+    "company": [
+      "Visa",
+      "Visa Inc",
+      "Visa network"
+    ],
     "weak": []
   },
   "MA": {
     "symbol": [],
-    "company": ["Mastercard", "Mastercard Inc", "Michael Miebach"],
+    "company": [
+      "Mastercard",
+      "Mastercard Inc",
+      "Michael Miebach"
+    ],
     "weak": []
   },
   "AXP": {
-    "symbol": ["AXP"],
-    "company": ["American Express", "Amex"],
+    "symbol": [
+      "AXP"
+    ],
+    "company": [
+      "American Express",
+      "Amex"
+    ],
     "weak": []
   },
   "BX": {
-    "symbol": ["BX"],
-    "company": ["Blackstone", "Blackstone Group", "Steve Schwarzman", "Schwarzman"],
+    "symbol": [
+      "BX"
+    ],
+    "company": [
+      "Blackstone",
+      "Blackstone Group",
+      "Steve Schwarzman",
+      "Schwarzman"
+    ],
     "weak": []
   },
   "COF": {
-    "symbol": ["COF"],
-    "company": ["Capital One", "Richard Fairbank"],
+    "symbol": [
+      "COF"
+    ],
+    "company": [
+      "Capital One",
+      "Richard Fairbank"
+    ],
     "weak": []
   },
   "SCHW": {
-    "symbol": ["SCHW"],
-    "company": ["Charles Schwab"],
-    "weak": ["Schwab brokerage"]
+    "symbol": [
+      "SCHW"
+    ],
+    "company": [
+      "Charles Schwab"
+    ],
+    "weak": [
+      "Schwab brokerage"
+    ]
   },
   "USB": {
-    "symbol": ["USB"],
-    "company": ["U.S. Bancorp", "US Bank", "Andy Cecere"],
+    "symbol": [
+      "USB"
+    ],
+    "company": [
+      "U.S. Bancorp",
+      "US Bank",
+      "Andy Cecere"
+    ],
     "weak": []
   },
   "PNC": {
-    "symbol": ["PNC"],
-    "company": ["PNC Financial", "PNC Bank", "Bill Demchak"],
+    "symbol": [
+      "PNC"
+    ],
+    "company": [
+      "PNC Financial",
+      "PNC Bank",
+      "Bill Demchak"
+    ],
     "weak": []
   },
   "TFC": {
-    "symbol": ["TFC"],
-    "company": ["Truist Financial", "Truist Bank"],
+    "symbol": [
+      "TFC"
+    ],
+    "company": [
+      "Truist Financial",
+      "Truist Bank"
+    ],
     "weak": []
   },
   "FITB": {
-    "symbol": ["FITB"],
-    "company": ["Fifth Third Bancorp", "Fifth Third Bank"],
+    "symbol": [
+      "FITB"
+    ],
+    "company": [
+      "Fifth Third Bancorp",
+      "Fifth Third Bank"
+    ],
     "weak": []
   },
   "KEY": {
     "symbol": [],
-    "company": ["KeyCorp", "KeyBank", "Key Bancorp"],
+    "company": [
+      "KeyCorp",
+      "KeyBank",
+      "Key Bancorp"
+    ],
     "weak": []
   },
   "RF": {
     "symbol": [],
-    "company": ["Regions Financial", "Regions Bank"],
+    "company": [
+      "Regions Financial",
+      "Regions Bank"
+    ],
     "weak": []
   },
   "MTB": {
-    "symbol": ["MTB"],
-    "company": ["M&T Bank", "M&T Bancorp"],
+    "symbol": [
+      "MTB"
+    ],
+    "company": [
+      "M&T Bank",
+      "M&T Bancorp"
+    ],
     "weak": []
   },
   "CFG": {
-    "symbol": ["CFG"],
-    "company": ["Citizens Financial", "Citizens Bank"],
+    "symbol": [
+      "CFG"
+    ],
+    "company": [
+      "Citizens Financial",
+      "Citizens Bank"
+    ],
     "weak": []
   },
   "HBAN": {
-    "symbol": ["HBAN"],
-    "company": ["Huntington Bancshares", "Huntington Bank"],
+    "symbol": [
+      "HBAN"
+    ],
+    "company": [
+      "Huntington Bancshares",
+      "Huntington Bank"
+    ],
     "weak": []
   },
   "CMA": {
-    "symbol": ["CMA"],
-    "company": ["Comerica", "Comerica Incorporated"],
+    "symbol": [
+      "CMA"
+    ],
+    "company": [
+      "Comerica",
+      "Comerica Incorporated"
+    ],
     "weak": []
   },
   "ZION": {
-    "symbol": ["ZION"],
-    "company": ["Zions Bancorporation"],
+    "symbol": [
+      "ZION"
+    ],
+    "company": [
+      "Zions Bancorporation"
+    ],
     "weak": []
   },
   "STT": {
-    "symbol": ["STT"],
-    "company": ["State Street", "State Street Corporation"],
+    "symbol": [
+      "STT"
+    ],
+    "company": [
+      "State Street",
+      "State Street Corporation"
+    ],
     "weak": []
   },
   "BK": {
     "symbol": [],
-    "company": ["Bank of New York Mellon", "BNY Mellon"],
+    "company": [
+      "Bank of New York Mellon",
+      "BNY Mellon"
+    ],
     "weak": []
   },
   "NTRS": {
-    "symbol": ["NTRS"],
-    "company": ["Northern Trust", "Northern Trust Corporation"],
+    "symbol": [
+      "NTRS"
+    ],
+    "company": [
+      "Northern Trust",
+      "Northern Trust Corporation"
+    ],
     "weak": []
   },
   "AMP": {
-    "symbol": ["AMP"],
-    "company": ["Ameriprise Financial", "Ameriprise"],
+    "symbol": [
+      "AMP"
+    ],
+    "company": [
+      "Ameriprise Financial",
+      "Ameriprise"
+    ],
     "weak": []
   },
   "LNC": {
-    "symbol": ["LNC"],
-    "company": ["Lincoln National"],
+    "symbol": [
+      "LNC"
+    ],
+    "company": [
+      "Lincoln National"
+    ],
     "weak": []
   },
   "HIG": {
-    "symbol": ["HIG"],
-    "company": ["Hartford Financial", "Hartford Insurance"],
+    "symbol": [
+      "HIG"
+    ],
+    "company": [
+      "Hartford Financial",
+      "Hartford Insurance"
+    ],
     "weak": []
   },
   "PFG": {
-    "symbol": ["PFG"],
-    "company": ["Principal Financial", "Principal Group"],
+    "symbol": [
+      "PFG"
+    ],
+    "company": [
+      "Principal Financial",
+      "Principal Group"
+    ],
     "weak": []
   },
   "TROW": {
-    "symbol": ["TROW"],
-    "company": ["T. Rowe Price"],
+    "symbol": [
+      "TROW"
+    ],
+    "company": [
+      "T. Rowe Price"
+    ],
     "weak": []
   },
   "BEN": {
     "symbol": [],
-    "company": ["Franklin Resources", "Franklin Templeton"],
+    "company": [
+      "Franklin Resources",
+      "Franklin Templeton"
+    ],
     "weak": []
   },
   "IVZ": {
-    "symbol": ["IVZ"],
-    "company": ["Invesco", "Invesco Ltd"],
+    "symbol": [
+      "IVZ"
+    ],
+    "company": [
+      "Invesco",
+      "Invesco Ltd"
+    ],
     "weak": []
   },
   "NDAQ": {
-    "symbol": ["NDAQ"],
-    "company": ["Nasdaq Inc", "Nasdaq exchange"],
+    "symbol": [
+      "NDAQ"
+    ],
+    "company": [
+      "Nasdaq Inc",
+      "Nasdaq exchange"
+    ],
     "weak": []
   },
   "CBOE": {
-    "symbol": ["CBOE"],
-    "company": ["Cboe Global Markets", "Chicago Board Options Exchange"],
+    "symbol": [
+      "CBOE"
+    ],
+    "company": [
+      "Cboe Global Markets",
+      "Chicago Board Options Exchange"
+    ],
     "weak": []
   },
   "SPGI": {
-    "symbol": ["SPGI"],
-    "company": ["S&P Global", "Standard and Poor's"],
+    "symbol": [
+      "SPGI"
+    ],
+    "company": [
+      "S&P Global",
+      "Standard and Poor's"
+    ],
     "weak": []
   },
   "MCO": {
-    "symbol": ["MCO"],
-    "company": ["Moody's", "Moody's Corporation"],
+    "symbol": [
+      "MCO"
+    ],
+    "company": [
+      "Moody's",
+      "Moody's Corporation"
+    ],
     "weak": []
   },
   "ICE": {
     "symbol": [],
-    "company": ["Intercontinental Exchange"],
+    "company": [
+      "Intercontinental Exchange"
+    ],
     "weak": []
   },
   "CME": {
-    "symbol": ["CME"],
-    "company": ["CME Group", "Chicago Mercantile Exchange"],
+    "symbol": [
+      "CME"
+    ],
+    "company": [
+      "CME Group",
+      "Chicago Mercantile Exchange"
+    ],
     "weak": []
   },
   "APO": {
-    "symbol": ["APO"],
-    "company": ["Apollo Global Management", "Marc Rowan Apollo"],
+    "symbol": [
+      "APO"
+    ],
+    "company": [
+      "Apollo Global Management",
+      "Marc Rowan Apollo"
+    ],
     "weak": []
   },
   "KKR": {
-    "symbol": ["KKR"],
-    "company": ["KKR", "Kohlberg Kravis Roberts", "KKR & Co"],
+    "symbol": [
+      "KKR"
+    ],
+    "company": [
+      "KKR",
+      "Kohlberg Kravis Roberts",
+      "KKR & Co"
+    ],
     "weak": []
   },
   "CG": {
     "symbol": [],
-    "company": ["Carlyle Group", "Carlyle"],
+    "company": [
+      "Carlyle Group",
+      "Carlyle"
+    ],
     "weak": []
   },
   "ARES": {
-    "symbol": ["ARES"],
-    "company": ["Ares Management"],
+    "symbol": [
+      "ARES"
+    ],
+    "company": [
+      "Ares Management"
+    ],
     "weak": []
   },
   "RJF": {
-    "symbol": ["RJF"],
-    "company": ["Raymond James", "Raymond James Financial"],
+    "symbol": [
+      "RJF"
+    ],
+    "company": [
+      "Raymond James",
+      "Raymond James Financial"
+    ],
     "weak": []
   },
   "FDS": {
-    "symbol": ["FDS"],
-    "company": ["FactSet Research", "FactSet"],
+    "symbol": [
+      "FDS"
+    ],
+    "company": [
+      "FactSet Research",
+      "FactSet"
+    ],
     "weak": []
   },
   "CB": {
     "symbol": [],
-    "company": ["Chubb", "Chubb Limited", "Evan Greenberg"],
+    "company": [
+      "Chubb",
+      "Chubb Limited",
+      "Evan Greenberg"
+    ],
     "weak": []
   },
   "PGR": {
-    "symbol": ["PGR"],
-    "company": ["Progressive", "Progressive Insurance", "Tricia Griffith"],
+    "symbol": [
+      "PGR"
+    ],
+    "company": [
+      "Progressive",
+      "Progressive Insurance",
+      "Tricia Griffith"
+    ],
     "weak": []
   },
   "TRV": {
-    "symbol": ["TRV"],
-    "company": ["Travelers", "Travelers Companies"],
+    "symbol": [
+      "TRV"
+    ],
+    "company": [
+      "Travelers",
+      "Travelers Companies"
+    ],
     "weak": []
   },
   "MET": {
-    "symbol": ["MET"],
-    "company": ["MetLife", "MetLife Inc"],
+    "symbol": [
+      "MET"
+    ],
+    "company": [
+      "MetLife",
+      "MetLife Inc"
+    ],
     "weak": []
   },
   "PRU": {
-    "symbol": ["PRU"],
-    "company": ["Prudential", "Prudential Financial"],
+    "symbol": [
+      "PRU"
+    ],
+    "company": [
+      "Prudential",
+      "Prudential Financial"
+    ],
     "weak": []
   },
   "AFL": {
-    "symbol": ["AFL"],
-    "company": ["Aflac", "Aflac Inc"],
+    "symbol": [
+      "AFL"
+    ],
+    "company": [
+      "Aflac",
+      "Aflac Inc"
+    ],
     "weak": []
   },
   "ALL": {
     "symbol": [],
-    "company": ["Allstate", "Allstate Corporation"],
+    "company": [
+      "Allstate",
+      "Allstate Corporation"
+    ],
     "weak": []
   },
   "RE": {
     "symbol": [],
-    "company": ["Everest Group"],
+    "company": [
+      "Everest Group"
+    ],
     "weak": []
   },
   "WRB": {
-    "symbol": ["WRB"],
-    "company": ["W.R. Berkley"],
+    "symbol": [
+      "WRB"
+    ],
+    "company": [
+      "W.R. Berkley"
+    ],
     "weak": []
   },
   "FNF": {
-    "symbol": ["FNF"],
-    "company": ["Fidelity National Financial"],
+    "symbol": [
+      "FNF"
+    ],
+    "company": [
+      "Fidelity National Financial"
+    ],
     "weak": []
   },
   "UNH": {
-    "symbol": ["UNH"],
-    "company": ["UnitedHealth", "United Healthcare", "UnitedHealth Group"],
+    "symbol": [
+      "UNH"
+    ],
+    "company": [
+      "UnitedHealth",
+      "United Healthcare",
+      "UnitedHealth Group"
+    ],
     "weak": []
   },
   "ELV": {
-    "symbol": ["ELV"],
-    "company": ["Elevance Health", "Anthem"],
-    "weak": ["Blue Cross Blue Shield"]
+    "symbol": [
+      "ELV"
+    ],
+    "company": [
+      "Elevance Health",
+      "Anthem"
+    ],
+    "weak": [
+      "Blue Cross Blue Shield"
+    ]
   },
   "CI": {
     "symbol": [],
-    "company": ["Cigna", "Cigna Corporation", "David Cordani"],
+    "company": [
+      "Cigna",
+      "Cigna Corporation",
+      "David Cordani"
+    ],
     "weak": []
   },
   "HUM": {
-    "symbol": ["HUM"],
-    "company": ["Humana", "Humana Inc"],
+    "symbol": [
+      "HUM"
+    ],
+    "company": [
+      "Humana",
+      "Humana Inc"
+    ],
     "weak": []
   },
   "CNC": {
-    "symbol": ["CNC"],
-    "company": ["Centene", "Centene Corporation"],
+    "symbol": [
+      "CNC"
+    ],
+    "company": [
+      "Centene",
+      "Centene Corporation"
+    ],
     "weak": []
   },
   "MOH": {
-    "symbol": ["MOH"],
-    "company": ["Molina Healthcare"],
+    "symbol": [
+      "MOH"
+    ],
+    "company": [
+      "Molina Healthcare"
+    ],
     "weak": []
   },
   "CVS": {
-    "symbol": ["CVS"],
-    "company": ["CVS Health", "Aetna"],
-    "weak": ["CVS Pharmacy"]
+    "symbol": [
+      "CVS"
+    ],
+    "company": [
+      "CVS Health",
+      "Aetna"
+    ],
+    "weak": [
+      "CVS Pharmacy"
+    ]
   },
   "JNJ": {
-    "symbol": ["JNJ"],
-    "company": ["Johnson & Johnson", "Johnson and Johnson"],
-    "weak": ["Tylenol", "Band-Aid", "Neutrogena"]
+    "symbol": [
+      "JNJ"
+    ],
+    "company": [
+      "Johnson & Johnson",
+      "Johnson and Johnson"
+    ],
+    "weak": [
+      "Tylenol",
+      "Band-Aid",
+      "Neutrogena"
+    ]
   },
   "PFE": {
-    "symbol": ["PFE"],
-    "company": ["Pfizer", "Pfizer Inc", "Albert Bourla"],
+    "symbol": [
+      "PFE"
+    ],
+    "company": [
+      "Pfizer",
+      "Pfizer Inc",
+      "Albert Bourla"
+    ],
     "weak": []
   },
   "MRK": {
-    "symbol": ["MRK"],
-    "company": ["Merck", "Merck & Co"],
-    "weak": ["Keytruda"]
+    "symbol": [
+      "MRK"
+    ],
+    "company": [
+      "Merck",
+      "Merck & Co"
+    ],
+    "weak": [
+      "Keytruda"
+    ]
   },
   "LLY": {
-    "symbol": ["LLY"],
-    "company": ["Eli Lilly", "Lilly", "David Ricks"],
-    "weak": ["Mounjaro", "Zepbound", "GLP-1", "tirzepatide"]
+    "symbol": [
+      "LLY"
+    ],
+    "company": [
+      "Eli Lilly",
+      "Lilly",
+      "David Ricks"
+    ],
+    "weak": [
+      "Mounjaro",
+      "Zepbound",
+      "GLP-1",
+      "tirzepatide"
+    ]
   },
   "ABBV": {
-    "symbol": ["ABBV"],
-    "company": ["AbbVie"],
-    "weak": ["Humira", "Skyrizi"]
+    "symbol": [
+      "ABBV"
+    ],
+    "company": [
+      "AbbVie"
+    ],
+    "weak": [
+      "Humira",
+      "Skyrizi"
+    ]
   },
   "AMGN": {
-    "symbol": ["AMGN"],
-    "company": ["Amgen", "Amgen Inc"],
+    "symbol": [
+      "AMGN"
+    ],
+    "company": [
+      "Amgen",
+      "Amgen Inc"
+    ],
     "weak": []
   },
   "MRNA": {
-    "symbol": ["MRNA"],
-    "company": ["Moderna", "Moderna Inc", "Stephane Bancel"],
-    "weak": ["mRNA vaccine"]
+    "symbol": [
+      "MRNA"
+    ],
+    "company": [
+      "Moderna",
+      "Moderna Inc",
+      "Stephane Bancel"
+    ],
+    "weak": [
+      "mRNA vaccine"
+    ]
   },
   "REGN": {
-    "symbol": ["REGN"],
-    "company": ["Regeneron", "Regeneron Pharmaceuticals"],
+    "symbol": [
+      "REGN"
+    ],
+    "company": [
+      "Regeneron",
+      "Regeneron Pharmaceuticals"
+    ],
     "weak": []
   },
   "BIIB": {
-    "symbol": ["BIIB"],
-    "company": ["Biogen", "Biogen Inc"],
+    "symbol": [
+      "BIIB"
+    ],
+    "company": [
+      "Biogen",
+      "Biogen Inc"
+    ],
     "weak": []
   },
   "VRTX": {
-    "symbol": ["VRTX"],
-    "company": ["Vertex Pharmaceuticals", "Vertex"],
-    "weak": ["cystic fibrosis drug"]
+    "symbol": [
+      "VRTX"
+    ],
+    "company": [
+      "Vertex Pharmaceuticals",
+      "Vertex"
+    ],
+    "weak": [
+      "cystic fibrosis drug"
+    ]
   },
   "GILD": {
-    "symbol": ["GILD"],
-    "company": ["Gilead", "Gilead Sciences"],
+    "symbol": [
+      "GILD"
+    ],
+    "company": [
+      "Gilead",
+      "Gilead Sciences"
+    ],
     "weak": []
   },
   "IDXX": {
-    "symbol": ["IDXX"],
-    "company": ["IDEXX Laboratories"],
+    "symbol": [
+      "IDXX"
+    ],
+    "company": [
+      "IDEXX Laboratories"
+    ],
     "weak": []
   },
   "DXCM": {
-    "symbol": ["DXCM"],
-    "company": ["DexCom", "Dexcom"],
+    "symbol": [
+      "DXCM"
+    ],
+    "company": [
+      "DexCom",
+      "Dexcom"
+    ],
     "weak": []
   },
   "ILMN": {
-    "symbol": ["ILMN"],
-    "company": ["Illumina", "Illumina Inc"],
+    "symbol": [
+      "ILMN"
+    ],
+    "company": [
+      "Illumina",
+      "Illumina Inc"
+    ],
     "weak": []
   },
   "GEHC": {
-    "symbol": ["GEHC"],
-    "company": ["GE HealthCare"],
+    "symbol": [
+      "GEHC"
+    ],
+    "company": [
+      "GE HealthCare"
+    ],
     "weak": []
   },
   "ISRG": {
-    "symbol": ["ISRG"],
-    "company": ["Intuitive Surgical"],
-    "weak": ["da Vinci surgical"]
+    "symbol": [
+      "ISRG"
+    ],
+    "company": [
+      "Intuitive Surgical"
+    ],
+    "weak": [
+      "da Vinci surgical"
+    ]
   },
   "MDT": {
-    "symbol": ["MDT"],
-    "company": ["Medtronic", "Medtronic plc"],
+    "symbol": [
+      "MDT"
+    ],
+    "company": [
+      "Medtronic",
+      "Medtronic plc"
+    ],
     "weak": []
   },
   "SYK": {
-    "symbol": ["SYK"],
-    "company": ["Stryker", "Stryker Corporation"],
+    "symbol": [
+      "SYK"
+    ],
+    "company": [
+      "Stryker",
+      "Stryker Corporation"
+    ],
     "weak": []
   },
   "BSX": {
-    "symbol": ["BSX"],
-    "company": ["Boston Scientific"],
+    "symbol": [
+      "BSX"
+    ],
+    "company": [
+      "Boston Scientific"
+    ],
     "weak": []
   },
   "BDX": {
-    "symbol": ["BDX"],
-    "company": ["Becton Dickinson"],
-    "weak": ["BD medical"]
+    "symbol": [
+      "BDX"
+    ],
+    "company": [
+      "Becton Dickinson"
+    ],
+    "weak": [
+      "BD medical"
+    ]
   },
   "EW": {
     "symbol": [],
-    "company": ["Edwards Lifesciences"],
+    "company": [
+      "Edwards Lifesciences"
+    ],
     "weak": []
   },
   "ZTS": {
-    "symbol": ["ZTS"],
-    "company": ["Zoetis", "Zoetis Inc"],
-    "weak": ["animal health"]
+    "symbol": [
+      "ZTS"
+    ],
+    "company": [
+      "Zoetis",
+      "Zoetis Inc"
+    ],
+    "weak": [
+      "animal health"
+    ]
   },
   "TMO": {
-    "symbol": ["TMO"],
-    "company": ["Thermo Fisher", "Thermo Fisher Scientific"],
+    "symbol": [
+      "TMO"
+    ],
+    "company": [
+      "Thermo Fisher",
+      "Thermo Fisher Scientific"
+    ],
     "weak": []
   },
   "DHR": {
-    "symbol": ["DHR"],
-    "company": ["Danaher", "Danaher Corporation"],
+    "symbol": [
+      "DHR"
+    ],
+    "company": [
+      "Danaher",
+      "Danaher Corporation"
+    ],
     "weak": []
   },
   "HCA": {
-    "symbol": ["HCA"],
-    "company": ["HCA Healthcare"],
+    "symbol": [
+      "HCA"
+    ],
+    "company": [
+      "HCA Healthcare"
+    ],
     "weak": []
   },
   "MCK": {
-    "symbol": ["MCK"],
-    "company": ["McKesson", "McKesson Corporation"],
+    "symbol": [
+      "MCK"
+    ],
+    "company": [
+      "McKesson",
+      "McKesson Corporation"
+    ],
     "weak": []
   },
   "COR": {
-    "symbol": ["COR"],
-    "company": ["Cencora", "AmerisourceBergen"],
+    "symbol": [
+      "COR"
+    ],
+    "company": [
+      "Cencora",
+      "AmerisourceBergen"
+    ],
     "weak": []
   },
   "BMY": {
-    "symbol": ["BMY"],
-    "company": ["Bristol-Myers Squibb", "Bristol Myers"],
+    "symbol": [
+      "BMY"
+    ],
+    "company": [
+      "Bristol-Myers Squibb",
+      "Bristol Myers"
+    ],
     "weak": []
   },
   "ABT": {
-    "symbol": ["ABT"],
-    "company": ["Abbott", "Abbott Laboratories"],
+    "symbol": [
+      "ABT"
+    ],
+    "company": [
+      "Abbott",
+      "Abbott Laboratories"
+    ],
     "weak": []
   },
   "RMD": {
-    "symbol": ["RMD"],
-    "company": ["ResMed", "ResMed Inc"],
+    "symbol": [
+      "RMD"
+    ],
+    "company": [
+      "ResMed",
+      "ResMed Inc"
+    ],
     "weak": []
   },
   "BAX": {
-    "symbol": ["BAX"],
-    "company": ["Baxter", "Baxter International"],
+    "symbol": [
+      "BAX"
+    ],
+    "company": [
+      "Baxter",
+      "Baxter International"
+    ],
     "weak": []
   },
   "IQV": {
-    "symbol": ["IQV"],
-    "company": ["IQVIA", "IQVIA Holdings"],
+    "symbol": [
+      "IQV"
+    ],
+    "company": [
+      "IQVIA",
+      "IQVIA Holdings"
+    ],
     "weak": []
   },
   "HOLX": {
-    "symbol": ["HOLX"],
-    "company": ["Hologic"],
+    "symbol": [
+      "HOLX"
+    ],
+    "company": [
+      "Hologic"
+    ],
     "weak": []
   },
   "A": {
     "symbol": [],
-    "company": ["Agilent Technologies", "Agilent"],
+    "company": [
+      "Agilent Technologies",
+      "Agilent"
+    ],
     "weak": []
   },
   "WAT": {
     "symbol": [],
-    "company": ["Waters Corporation"],
+    "company": [
+      "Waters Corporation"
+    ],
     "weak": []
   },
   "ALGN": {
-    "symbol": ["ALGN"],
-    "company": ["Align Technology"],
-    "weak": ["Invisalign"]
+    "symbol": [
+      "ALGN"
+    ],
+    "company": [
+      "Align Technology"
+    ],
+    "weak": [
+      "Invisalign"
+    ]
   },
   "HSIC": {
-    "symbol": ["HSIC"],
-    "company": ["Henry Schein"],
+    "symbol": [
+      "HSIC"
+    ],
+    "company": [
+      "Henry Schein"
+    ],
     "weak": []
   },
   "VTRS": {
-    "symbol": ["VTRS"],
-    "company": ["Viatris"],
+    "symbol": [
+      "VTRS"
+    ],
+    "company": [
+      "Viatris"
+    ],
     "weak": []
   },
   "CRL": {
-    "symbol": ["CRL"],
-    "company": ["Charles River Laboratories"],
+    "symbol": [
+      "CRL"
+    ],
+    "company": [
+      "Charles River Laboratories"
+    ],
     "weak": []
   },
   "MTD": {
-    "symbol": ["MTD"],
-    "company": ["Mettler-Toledo"],
+    "symbol": [
+      "MTD"
+    ],
+    "company": [
+      "Mettler-Toledo"
+    ],
     "weak": []
   },
   "PODD": {
-    "symbol": ["PODD"],
-    "company": ["Insulet Corporation"],
-    "weak": ["Omnipod insulin"]
+    "symbol": [
+      "PODD"
+    ],
+    "company": [
+      "Insulet Corporation"
+    ],
+    "weak": [
+      "Omnipod insulin"
+    ]
   },
   "EXAS": {
-    "symbol": ["EXAS"],
-    "company": ["Exact Sciences"],
-    "weak": ["Cologuard"]
+    "symbol": [
+      "EXAS"
+    ],
+    "company": [
+      "Exact Sciences"
+    ],
+    "weak": [
+      "Cologuard"
+    ]
   },
   "INCY": {
-    "symbol": ["INCY"],
-    "company": ["Incyte", "Incyte Corporation"],
+    "symbol": [
+      "INCY"
+    ],
+    "company": [
+      "Incyte",
+      "Incyte Corporation"
+    ],
     "weak": []
   },
   "PKI": {
-    "symbol": ["PKI"],
-    "company": ["Revvity", "PerkinElmer"],
+    "symbol": [
+      "PKI"
+    ],
+    "company": [
+      "Revvity",
+      "PerkinElmer"
+    ],
     "weak": []
   },
   "OGN": {
-    "symbol": ["OGN"],
-    "company": ["Organon", "Organon & Co"],
+    "symbol": [
+      "OGN"
+    ],
+    "company": [
+      "Organon",
+      "Organon & Co"
+    ],
     "weak": []
   },
   "DVA": {
-    "symbol": ["DVA"],
-    "company": ["DaVita", "DaVita Inc"],
-    "weak": ["dialysis"]
+    "symbol": [
+      "DVA"
+    ],
+    "company": [
+      "DaVita",
+      "DaVita Inc"
+    ],
+    "weak": [
+      "dialysis"
+    ]
   },
   "WMT": {
-    "symbol": ["WMT"],
-    "company": ["Walmart", "Wal-Mart", "Sam's Club", "Doug McMillon"],
+    "symbol": [
+      "WMT"
+    ],
+    "company": [
+      "Walmart",
+      "Wal-Mart",
+      "Sam's Club",
+      "Doug McMillon"
+    ],
     "weak": []
   },
   "TGT": {
-    "symbol": ["TGT"],
-    "company": ["Target Corporation", "Brian Cornell"],
+    "symbol": [
+      "TGT"
+    ],
+    "company": [
+      "Target Corporation",
+      "Brian Cornell"
+    ],
     "weak": []
   },
   "COST": {
-    "symbol": ["COST"],
-    "company": ["Costco", "Costco Wholesale"],
+    "symbol": [
+      "COST"
+    ],
+    "company": [
+      "Costco",
+      "Costco Wholesale"
+    ],
     "weak": []
   },
   "HD": {
     "symbol": [],
-    "company": ["Home Depot", "Home Depot Inc", "Ted Decker"],
+    "company": [
+      "Home Depot",
+      "Home Depot Inc",
+      "Ted Decker"
+    ],
     "weak": []
   },
   "LOW": {
     "symbol": [],
-    "company": ["Lowe's", "Lowe's Companies"],
+    "company": [
+      "Lowe's",
+      "Lowe's Companies"
+    ],
     "weak": []
   },
   "TJX": {
-    "symbol": ["TJX"],
-    "company": ["TJX Companies", "T.J. Maxx", "Marshalls"],
-    "weak": ["HomeGoods"]
+    "symbol": [
+      "TJX"
+    ],
+    "company": [
+      "TJX Companies",
+      "T.J. Maxx",
+      "Marshalls"
+    ],
+    "weak": [
+      "HomeGoods"
+    ]
   },
   "NKE": {
-    "symbol": ["NKE"],
-    "company": ["Nike", "Nike Inc", "John Donahoe", "Phil Knight"],
-    "weak": ["Jordan Brand", "Air Jordan"]
+    "symbol": [
+      "NKE"
+    ],
+    "company": [
+      "Nike",
+      "Nike Inc",
+      "John Donahoe",
+      "Phil Knight"
+    ],
+    "weak": [
+      "Jordan Brand",
+      "Air Jordan"
+    ]
   },
   "SBUX": {
-    "symbol": ["SBUX"],
-    "company": ["Starbucks", "Starbucks Coffee", "Brian Niccol"],
+    "symbol": [
+      "SBUX"
+    ],
+    "company": [
+      "Starbucks",
+      "Starbucks Coffee",
+      "Brian Niccol"
+    ],
     "weak": []
   },
   "MCD": {
-    "symbol": ["MCD"],
-    "company": ["McDonald's", "Chris Kempczinski"],
-    "weak": ["Big Mac", "McFlurry"]
+    "symbol": [
+      "MCD"
+    ],
+    "company": [
+      "McDonald's",
+      "Chris Kempczinski"
+    ],
+    "weak": [
+      "Big Mac",
+      "McFlurry"
+    ]
   },
   "CMG": {
-    "symbol": ["CMG"],
-    "company": ["Chipotle", "Chipotle Mexican Grill"],
+    "symbol": [
+      "CMG"
+    ],
+    "company": [
+      "Chipotle",
+      "Chipotle Mexican Grill"
+    ],
     "weak": []
   },
   "YUM": {
-    "symbol": ["YUM"],
-    "company": ["Yum Brands"],
-    "weak": ["KFC", "Pizza Hut", "Taco Bell"]
+    "symbol": [
+      "YUM"
+    ],
+    "company": [
+      "Yum Brands"
+    ],
+    "weak": [
+      "KFC",
+      "Pizza Hut",
+      "Taco Bell"
+    ]
   },
   "LULU": {
-    "symbol": ["LULU"],
-    "company": ["Lululemon", "Lululemon Athletica"],
+    "symbol": [
+      "LULU"
+    ],
+    "company": [
+      "Lululemon",
+      "Lululemon Athletica"
+    ],
     "weak": []
   },
   "ROST": {
-    "symbol": ["ROST"],
-    "company": ["Ross Stores", "Ross Dress for Less"],
+    "symbol": [
+      "ROST"
+    ],
+    "company": [
+      "Ross Stores",
+      "Ross Dress for Less"
+    ],
     "weak": []
   },
   "ORLY": {
-    "symbol": ["ORLY"],
-    "company": ["O'Reilly Auto Parts"],
+    "symbol": [
+      "ORLY"
+    ],
+    "company": [
+      "O'Reilly Auto Parts"
+    ],
     "weak": []
   },
   "DLTR": {
-    "symbol": ["DLTR"],
-    "company": ["Dollar Tree", "Dollar Tree Stores"],
+    "symbol": [
+      "DLTR"
+    ],
+    "company": [
+      "Dollar Tree",
+      "Dollar Tree Stores"
+    ],
     "weak": []
   },
   "DG": {
     "symbol": [],
-    "company": ["Dollar General", "Dollar General Corporation"],
+    "company": [
+      "Dollar General",
+      "Dollar General Corporation"
+    ],
     "weak": []
   },
   "BBY": {
-    "symbol": ["BBY"],
-    "company": ["Best Buy", "Best Buy Co"],
+    "symbol": [
+      "BBY"
+    ],
+    "company": [
+      "Best Buy",
+      "Best Buy Co"
+    ],
     "weak": []
   },
   "BURL": {
-    "symbol": ["BURL"],
-    "company": ["Burlington", "Burlington Stores"],
+    "symbol": [
+      "BURL"
+    ],
+    "company": [
+      "Burlington",
+      "Burlington Stores"
+    ],
     "weak": []
   },
   "AZO": {
-    "symbol": ["AZO"],
-    "company": ["AutoZone", "AutoZone Inc"],
+    "symbol": [
+      "AZO"
+    ],
+    "company": [
+      "AutoZone",
+      "AutoZone Inc"
+    ],
     "weak": []
   },
   "AAP": {
-    "symbol": ["AAP"],
-    "company": ["Advance Auto Parts"],
+    "symbol": [
+      "AAP"
+    ],
+    "company": [
+      "Advance Auto Parts"
+    ],
     "weak": []
   },
   "KMX": {
-    "symbol": ["KMX"],
-    "company": ["CarMax", "CarMax Inc"],
+    "symbol": [
+      "KMX"
+    ],
+    "company": [
+      "CarMax",
+      "CarMax Inc"
+    ],
     "weak": []
   },
   "AN": {
     "symbol": [],
-    "company": ["AutoNation", "AutoNation Inc"],
+    "company": [
+      "AutoNation",
+      "AutoNation Inc"
+    ],
     "weak": []
   },
   "LKQ": {
-    "symbol": ["LKQ"],
-    "company": ["LKQ Corporation"],
+    "symbol": [
+      "LKQ"
+    ],
+    "company": [
+      "LKQ Corporation"
+    ],
     "weak": []
   },
   "DKNG": {
-    "symbol": ["DKNG"],
-    "company": ["DraftKings"],
-    "weak": ["sports betting"]
+    "symbol": [
+      "DKNG"
+    ],
+    "company": [
+      "DraftKings"
+    ],
+    "weak": [
+      "sports betting"
+    ]
   },
   "DASH": {
-    "symbol": ["DASH"],
-    "company": ["DoorDash", "DoorDash Inc", "Tony Xu"],
+    "symbol": [
+      "DASH"
+    ],
+    "company": [
+      "DoorDash",
+      "DoorDash Inc",
+      "Tony Xu"
+    ],
     "weak": []
   },
   "EBAY": {
-    "symbol": ["EBAY"],
-    "company": ["eBay", "eBay Inc", "Jamie Iannone"],
+    "symbol": [
+      "EBAY"
+    ],
+    "company": [
+      "eBay",
+      "eBay Inc",
+      "Jamie Iannone"
+    ],
     "weak": []
   },
   "ETSY": {
-    "symbol": ["ETSY"],
-    "company": ["Etsy", "Etsy Inc"],
+    "symbol": [
+      "ETSY"
+    ],
+    "company": [
+      "Etsy",
+      "Etsy Inc"
+    ],
     "weak": []
   },
   "MAT": {
-    "symbol": ["MAT"],
-    "company": ["Mattel"],
-    "weak": ["Barbie", "Hot Wheels", "Fisher-Price"]
+    "symbol": [
+      "MAT"
+    ],
+    "company": [
+      "Mattel"
+    ],
+    "weak": [
+      "Barbie",
+      "Hot Wheels",
+      "Fisher-Price"
+    ]
   },
   "HAS": {
     "symbol": [],
-    "company": ["Hasbro", "Hasbro Inc"],
-    "weak": ["Transformers toy", "Monopoly game", "My Little Pony"]
+    "company": [
+      "Hasbro",
+      "Hasbro Inc"
+    ],
+    "weak": [
+      "Transformers toy",
+      "Monopoly game",
+      "My Little Pony"
+    ]
   },
   "DECK": {
-    "symbol": ["DECK"],
-    "company": ["Deckers Outdoor"],
-    "weak": ["UGG boots", "Hoka"]
+    "symbol": [
+      "DECK"
+    ],
+    "company": [
+      "Deckers Outdoor"
+    ],
+    "weak": [
+      "UGG boots",
+      "Hoka"
+    ]
   },
   "CTAS": {
-    "symbol": ["CTAS"],
-    "company": ["Cintas", "Cintas Corporation"],
+    "symbol": [
+      "CTAS"
+    ],
+    "company": [
+      "Cintas",
+      "Cintas Corporation"
+    ],
     "weak": []
   },
   "WSM": {
-    "symbol": ["WSM"],
-    "company": ["Williams-Sonoma"],
-    "weak": ["Pottery Barn", "West Elm"]
+    "symbol": [
+      "WSM"
+    ],
+    "company": [
+      "Williams-Sonoma"
+    ],
+    "weak": [
+      "Pottery Barn",
+      "West Elm"
+    ]
   },
   "RH": {
     "symbol": [],
-    "company": ["RH", "Restoration Hardware", "Gary Friedman"],
+    "company": [
+      "RH",
+      "Restoration Hardware",
+      "Gary Friedman"
+    ],
     "weak": []
   },
   "GRMN": {
-    "symbol": ["GRMN"],
-    "company": ["Garmin", "Garmin Ltd"],
+    "symbol": [
+      "GRMN"
+    ],
+    "company": [
+      "Garmin",
+      "Garmin Ltd"
+    ],
     "weak": []
   },
   "RL": {
     "symbol": [],
-    "company": ["Ralph Lauren", "Polo Ralph Lauren"],
+    "company": [
+      "Ralph Lauren",
+      "Polo Ralph Lauren"
+    ],
     "weak": []
   },
   "PVH": {
-    "symbol": ["PVH"],
-    "company": ["PVH Corp"],
-    "weak": ["Calvin Klein", "Tommy Hilfiger"]
+    "symbol": [
+      "PVH"
+    ],
+    "company": [
+      "PVH Corp"
+    ],
+    "weak": [
+      "Calvin Klein",
+      "Tommy Hilfiger"
+    ]
   },
   "TPR": {
-    "symbol": ["TPR"],
-    "company": ["Tapestry"],
-    "weak": ["Coach handbags", "Kate Spade"]
+    "symbol": [
+      "TPR"
+    ],
+    "company": [
+      "Tapestry"
+    ],
+    "weak": [
+      "Coach handbags",
+      "Kate Spade"
+    ]
   },
   "CPRI": {
-    "symbol": ["CPRI"],
-    "company": ["Capri Holdings"],
-    "weak": ["Michael Kors", "Versace", "Jimmy Choo"]
+    "symbol": [
+      "CPRI"
+    ],
+    "company": [
+      "Capri Holdings"
+    ],
+    "weak": [
+      "Michael Kors",
+      "Versace",
+      "Jimmy Choo"
+    ]
   },
   "VFC": {
-    "symbol": ["VFC"],
-    "company": ["VF Corporation"],
-    "weak": ["The North Face", "Vans", "Timberland"]
+    "symbol": [
+      "VFC"
+    ],
+    "company": [
+      "VF Corporation"
+    ],
+    "weak": [
+      "The North Face",
+      "Vans",
+      "Timberland"
+    ]
   },
   "APTV": {
-    "symbol": ["APTV"],
-    "company": ["Aptiv", "Aptiv plc"],
+    "symbol": [
+      "APTV"
+    ],
+    "company": [
+      "Aptiv",
+      "Aptiv plc"
+    ],
     "weak": []
   },
   "BWA": {
-    "symbol": ["BWA"],
-    "company": ["BorgWarner", "BorgWarner Inc"],
+    "symbol": [
+      "BWA"
+    ],
+    "company": [
+      "BorgWarner",
+      "BorgWarner Inc"
+    ],
     "weak": []
   },
   "MAR": {
-    "symbol": ["MAR"],
-    "company": ["Marriott", "Marriott International", "Anthony Capuano"],
+    "symbol": [
+      "MAR"
+    ],
+    "company": [
+      "Marriott",
+      "Marriott International",
+      "Anthony Capuano"
+    ],
     "weak": []
   },
   "HLT": {
-    "symbol": ["HLT"],
-    "company": ["Hilton", "Hilton Hotels", "Christopher Nassetta"],
+    "symbol": [
+      "HLT"
+    ],
+    "company": [
+      "Hilton",
+      "Hilton Hotels",
+      "Christopher Nassetta"
+    ],
     "weak": []
   },
   "H": {
     "symbol": [],
-    "company": ["Hyatt Hotels", "Hyatt Corporation", "Mark Hoplamazian"],
+    "company": [
+      "Hyatt Hotels",
+      "Hyatt Corporation",
+      "Mark Hoplamazian"
+    ],
     "weak": []
   },
   "CCL": {
-    "symbol": ["CCL"],
-    "company": ["Carnival Cruise", "Carnival Corporation"],
+    "symbol": [
+      "CCL"
+    ],
+    "company": [
+      "Carnival Cruise",
+      "Carnival Corporation"
+    ],
     "weak": []
   },
   "RCL": {
-    "symbol": ["RCL"],
-    "company": ["Royal Caribbean", "Royal Caribbean Cruises", "Jason Liberty"],
+    "symbol": [
+      "RCL"
+    ],
+    "company": [
+      "Royal Caribbean",
+      "Royal Caribbean Cruises",
+      "Jason Liberty"
+    ],
     "weak": []
   },
   "NCLH": {
-    "symbol": ["NCLH"],
-    "company": ["Norwegian Cruise", "Norwegian Cruise Line"],
+    "symbol": [
+      "NCLH"
+    ],
+    "company": [
+      "Norwegian Cruise",
+      "Norwegian Cruise Line"
+    ],
     "weak": []
   },
   "VAC": {
-    "symbol": ["VAC"],
-    "company": ["Marriott Vacations"],
+    "symbol": [
+      "VAC"
+    ],
+    "company": [
+      "Marriott Vacations"
+    ],
     "weak": []
   },
   "DHI": {
-    "symbol": ["DHI"],
-    "company": ["D.R. Horton", "DR Horton"],
-    "weak": ["homebuilder"]
+    "symbol": [
+      "DHI"
+    ],
+    "company": [
+      "D.R. Horton",
+      "DR Horton"
+    ],
+    "weak": [
+      "homebuilder"
+    ]
   },
   "LEN": {
-    "symbol": ["LEN"],
-    "company": ["Lennar", "Lennar Corporation"],
+    "symbol": [
+      "LEN"
+    ],
+    "company": [
+      "Lennar",
+      "Lennar Corporation"
+    ],
     "weak": []
   },
   "PHM": {
-    "symbol": ["PHM"],
-    "company": ["PulteGroup", "Pulte Homes"],
+    "symbol": [
+      "PHM"
+    ],
+    "company": [
+      "PulteGroup",
+      "Pulte Homes"
+    ],
     "weak": []
   },
   "TOL": {
-    "symbol": ["TOL"],
-    "company": ["Toll Brothers"],
-    "weak": ["luxury homebuilder"]
+    "symbol": [
+      "TOL"
+    ],
+    "company": [
+      "Toll Brothers"
+    ],
+    "weak": [
+      "luxury homebuilder"
+    ]
   },
   "NVR": {
-    "symbol": ["NVR"],
-    "company": ["NVR Inc", "Ryan Homes", "NVHomes"],
+    "symbol": [
+      "NVR"
+    ],
+    "company": [
+      "NVR Inc",
+      "Ryan Homes",
+      "NVHomes"
+    ],
     "weak": []
   },
   "GM": {
-    "symbol": ["GM"],
-    "company": ["General Motors", "Mary Barra"],
-    "weak": ["Chevrolet", "Cadillac", "Buick", "GMC truck"]
+    "symbol": [
+      "GM"
+    ],
+    "company": [
+      "General Motors",
+      "Mary Barra"
+    ],
+    "weak": [
+      "Chevrolet",
+      "Cadillac",
+      "Buick",
+      "GMC truck"
+    ]
   },
   "F": {
     "symbol": [],
-    "company": ["Ford Motor", "Ford Motor Company", "Jim Farley"],
-    "weak": ["Ford F-150", "Ford truck", "Mustang"]
+    "company": [
+      "Ford Motor",
+      "Ford Motor Company",
+      "Jim Farley"
+    ],
+    "weak": [
+      "Ford F-150",
+      "Ford truck",
+      "Mustang"
+    ]
   },
   "RIVN": {
-    "symbol": ["RIVN"],
-    "company": ["Rivian", "Rivian Automotive"],
+    "symbol": [
+      "RIVN"
+    ],
+    "company": [
+      "Rivian",
+      "Rivian Automotive"
+    ],
     "weak": []
   },
   "STLA": {
-    "symbol": ["STLA"],
-    "company": ["Stellantis", "Carlos Tavares"],
-    "weak": ["Jeep", "Ram truck", "Dodge", "Chrysler", "Fiat"]
+    "symbol": [
+      "STLA"
+    ],
+    "company": [
+      "Stellantis",
+      "Carlos Tavares"
+    ],
+    "weak": [
+      "Jeep",
+      "Ram truck",
+      "Dodge",
+      "Chrysler",
+      "Fiat"
+    ]
   },
   "LCID": {
-    "symbol": ["LCID"],
-    "company": ["Lucid Motors"],
-    "weak": ["Lucid Air"]
+    "symbol": [
+      "LCID"
+    ],
+    "company": [
+      "Lucid Motors"
+    ],
+    "weak": [
+      "Lucid Air"
+    ]
   },
   "STZ": {
-    "symbol": ["STZ"],
-    "company": ["Constellation Brands"],
-    "weak": ["Corona beer", "Modelo"]
+    "symbol": [
+      "STZ"
+    ],
+    "company": [
+      "Constellation Brands"
+    ],
+    "weak": [
+      "Corona beer",
+      "Modelo"
+    ]
   },
   "GIS": {
-    "symbol": ["GIS"],
-    "company": ["General Mills", "General Mills Inc"],
-    "weak": ["Cheerios", "Wheaties"]
+    "symbol": [
+      "GIS"
+    ],
+    "company": [
+      "General Mills",
+      "General Mills Inc"
+    ],
+    "weak": [
+      "Cheerios",
+      "Wheaties"
+    ]
   },
   "K": {
     "symbol": [],
-    "company": ["Kellanova", "Kellogg"],
-    "weak": ["Pringles", "Pop-Tarts", "Frosted Flakes"]
+    "company": [
+      "Kellanova",
+      "Kellogg"
+    ],
+    "weak": [
+      "Pringles",
+      "Pop-Tarts",
+      "Frosted Flakes"
+    ]
   },
   "CPB": {
-    "symbol": ["CPB"],
-    "company": ["Campbell Soup", "Campbell's"],
+    "symbol": [
+      "CPB"
+    ],
+    "company": [
+      "Campbell Soup",
+      "Campbell's"
+    ],
     "weak": []
   },
   "CL": {
     "symbol": [],
-    "company": ["Colgate-Palmolive", "Colgate", "Palmolive"],
+    "company": [
+      "Colgate-Palmolive",
+      "Colgate",
+      "Palmolive"
+    ],
     "weak": []
   },
   "KMB": {
-    "symbol": ["KMB"],
-    "company": ["Kimberly-Clark"],
-    "weak": ["Kleenex", "Huggies"]
+    "symbol": [
+      "KMB"
+    ],
+    "company": [
+      "Kimberly-Clark"
+    ],
+    "weak": [
+      "Kleenex",
+      "Huggies"
+    ]
   },
   "SYY": {
-    "symbol": ["SYY"],
-    "company": ["Sysco", "Sysco Corporation"],
+    "symbol": [
+      "SYY"
+    ],
+    "company": [
+      "Sysco",
+      "Sysco Corporation"
+    ],
     "weak": []
   },
   "HRL": {
-    "symbol": ["HRL"],
-    "company": ["Hormel Foods", "Hormel"],
-    "weak": ["Spam"]
+    "symbol": [
+      "HRL"
+    ],
+    "company": [
+      "Hormel Foods",
+      "Hormel"
+    ],
+    "weak": [
+      "Spam"
+    ]
   },
   "MKC": {
-    "symbol": ["MKC"],
-    "company": ["McCormick", "McCormick & Company"],
+    "symbol": [
+      "MKC"
+    ],
+    "company": [
+      "McCormick",
+      "McCormick & Company"
+    ],
     "weak": []
   },
   "CLX": {
-    "symbol": ["CLX"],
-    "company": ["Clorox", "Clorox Company"],
+    "symbol": [
+      "CLX"
+    ],
+    "company": [
+      "Clorox",
+      "Clorox Company"
+    ],
     "weak": []
   },
   "EL": {
     "symbol": [],
-    "company": ["Estee Lauder", "Estée Lauder"],
-    "weak": ["MAC cosmetics", "Clinique"]
+    "company": [
+      "Estee Lauder",
+      "Est\u00e9e Lauder"
+    ],
+    "weak": [
+      "MAC cosmetics",
+      "Clinique"
+    ]
   },
   "CHD": {
-    "symbol": ["CHD"],
-    "company": ["Church & Dwight"],
-    "weak": ["Arm & Hammer"]
+    "symbol": [
+      "CHD"
+    ],
+    "company": [
+      "Church & Dwight"
+    ],
+    "weak": [
+      "Arm & Hammer"
+    ]
   },
   "KO": {
-    "symbol": ["KO"],
-    "company": ["Coca-Cola", "James Quincey"],
-    "weak": ["Coke", "Sprite", "Fanta"]
+    "symbol": [
+      "KO"
+    ],
+    "company": [
+      "Coca-Cola",
+      "James Quincey"
+    ],
+    "weak": [
+      "Coke",
+      "Sprite",
+      "Fanta"
+    ]
   },
   "PEP": {
-    "symbol": ["PEP"],
-    "company": ["PepsiCo"],
-    "weak": ["Pepsi", "Frito-Lay", "Gatorade", "Mountain Dew"]
+    "symbol": [
+      "PEP"
+    ],
+    "company": [
+      "PepsiCo"
+    ],
+    "weak": [
+      "Pepsi",
+      "Frito-Lay",
+      "Gatorade",
+      "Mountain Dew"
+    ]
   },
   "PG": {
     "symbol": [],
-    "company": ["Procter & Gamble", "P&G"],
-    "weak": ["Tide detergent", "Pampers", "Gillette", "Crest toothpaste"]
+    "company": [
+      "Procter & Gamble",
+      "P&G"
+    ],
+    "weak": [
+      "Tide detergent",
+      "Pampers",
+      "Gillette",
+      "Crest toothpaste"
+    ]
   },
   "PM": {
     "symbol": [],
-    "company": ["Philip Morris", "Philip Morris International"],
+    "company": [
+      "Philip Morris",
+      "Philip Morris International"
+    ],
     "weak": []
   },
   "MO": {
-    "symbol": ["MO"],
-    "company": ["Altria", "Altria Group"],
-    "weak": ["Marlboro"]
+    "symbol": [
+      "MO"
+    ],
+    "company": [
+      "Altria",
+      "Altria Group"
+    ],
+    "weak": [
+      "Marlboro"
+    ]
   },
   "MDLZ": {
-    "symbol": ["MDLZ"],
-    "company": ["Mondelez", "Mondelez International"],
-    "weak": ["Oreo", "Cadbury", "Toblerone"]
+    "symbol": [
+      "MDLZ"
+    ],
+    "company": [
+      "Mondelez",
+      "Mondelez International"
+    ],
+    "weak": [
+      "Oreo",
+      "Cadbury",
+      "Toblerone"
+    ]
   },
   "KHC": {
-    "symbol": ["KHC"],
-    "company": ["Kraft Heinz", "Kraft", "Heinz"],
+    "symbol": [
+      "KHC"
+    ],
+    "company": [
+      "Kraft Heinz",
+      "Kraft",
+      "Heinz"
+    ],
     "weak": []
   },
   "MNST": {
-    "symbol": ["MNST"],
-    "company": ["Monster Beverage"],
-    "weak": ["Monster Energy"]
+    "symbol": [
+      "MNST"
+    ],
+    "company": [
+      "Monster Beverage"
+    ],
+    "weak": [
+      "Monster Energy"
+    ]
   },
   "WBA": {
-    "symbol": ["WBA"],
-    "company": ["Walgreens", "Walgreens Boots Alliance"],
+    "symbol": [
+      "WBA"
+    ],
+    "company": [
+      "Walgreens",
+      "Walgreens Boots Alliance"
+    ],
     "weak": []
   },
   "DIS": {
-    "symbol": ["DIS"],
-    "company": ["Disney", "Walt Disney", "Bob Iger"],
-    "weak": ["Disney+", "ESPN", "Hulu", "Marvel", "Star Wars", "Pixar"]
+    "symbol": [
+      "DIS"
+    ],
+    "company": [
+      "Disney",
+      "Walt Disney",
+      "Bob Iger"
+    ],
+    "weak": [
+      "Disney+",
+      "ESPN",
+      "Hulu",
+      "Marvel",
+      "Star Wars",
+      "Pixar"
+    ]
   },
   "NFLX": {
-    "symbol": ["NFLX"],
-    "company": ["Netflix", "Ted Sarandos", "Greg Peters"],
+    "symbol": [
+      "NFLX"
+    ],
+    "company": [
+      "Netflix",
+      "Ted Sarandos",
+      "Greg Peters"
+    ],
     "weak": []
   },
   "FOXA": {
-    "symbol": ["FOXA"],
-    "company": ["Fox News", "Fox Corporation", "Fox Business", "Rupert Murdoch", "Lachlan Murdoch"],
+    "symbol": [
+      "FOXA"
+    ],
+    "company": [
+      "Fox News",
+      "Fox Corporation",
+      "Fox Business",
+      "Rupert Murdoch",
+      "Lachlan Murdoch"
+    ],
     "weak": []
   },
   "PARA": {
-    "symbol": ["PARA"],
-    "company": ["Paramount", "Paramount Global", "CBS News", "Shari Redstone"],
-    "weak": ["Nickelodeon", "MTV"]
+    "symbol": [
+      "PARA"
+    ],
+    "company": [
+      "Paramount",
+      "Paramount Global",
+      "CBS News",
+      "Shari Redstone"
+    ],
+    "weak": [
+      "Nickelodeon",
+      "MTV"
+    ]
   },
   "WBD": {
-    "symbol": ["WBD"],
-    "company": ["Warner Bros", "Warner Bros Discovery", "CNN", "HBO", "David Zaslav"],
+    "symbol": [
+      "WBD"
+    ],
+    "company": [
+      "Warner Bros",
+      "Warner Bros Discovery",
+      "CNN",
+      "HBO",
+      "David Zaslav"
+    ],
     "weak": []
   },
   "CMCSA": {
-    "symbol": ["CMCSA"],
-    "company": ["Comcast", "NBCUniversal", "Brian Roberts"],
-    "weak": ["MSNBC", "NBC News"]
+    "symbol": [
+      "CMCSA"
+    ],
+    "company": [
+      "Comcast",
+      "NBCUniversal",
+      "Brian Roberts"
+    ],
+    "weak": [
+      "MSNBC",
+      "NBC News"
+    ]
   },
   "NYT": {
-    "symbol": ["NYT"],
-    "company": ["New York Times", "New York Times Company"],
+    "symbol": [
+      "NYT"
+    ],
+    "company": [
+      "New York Times",
+      "New York Times Company"
+    ],
     "weak": []
   },
   "NWSA": {
-    "symbol": ["NWSA"],
-    "company": ["News Corp", "News Corporation", "Wall Street Journal", "Rupert Murdoch"],
+    "symbol": [
+      "NWSA"
+    ],
+    "company": [
+      "News Corp",
+      "News Corporation",
+      "Wall Street Journal",
+      "Rupert Murdoch"
+    ],
     "weak": []
   },
   "LYV": {
-    "symbol": ["LYV"],
-    "company": ["Live Nation", "Live Nation Entertainment", "Ticketmaster"],
+    "symbol": [
+      "LYV"
+    ],
+    "company": [
+      "Live Nation",
+      "Live Nation Entertainment",
+      "Ticketmaster"
+    ],
     "weak": []
   },
   "PINS": {
-    "symbol": ["PINS"],
-    "company": ["Pinterest", "Pinterest Inc"],
+    "symbol": [
+      "PINS"
+    ],
+    "company": [
+      "Pinterest",
+      "Pinterest Inc"
+    ],
     "weak": []
   },
   "MTCH": {
-    "symbol": ["MTCH"],
-    "company": ["Match Group"],
-    "weak": ["Tinder", "Hinge", "OkCupid"]
+    "symbol": [
+      "MTCH"
+    ],
+    "company": [
+      "Match Group"
+    ],
+    "weak": [
+      "Tinder",
+      "Hinge",
+      "OkCupid"
+    ]
   },
   "ZM": {
     "symbol": [],
-    "company": ["Zoom", "Zoom Video", "Eric Yuan"],
+    "company": [
+      "Zoom",
+      "Zoom Video",
+      "Eric Yuan"
+    ],
     "weak": []
   },
   "T": {
     "symbol": [],
-    "company": ["AT&T", "AT&T Inc", "John Stankey"],
-    "weak": ["DirecTV"]
+    "company": [
+      "AT&T",
+      "AT&T Inc",
+      "John Stankey"
+    ],
+    "weak": [
+      "DirecTV"
+    ]
   },
   "VZ": {
-    "symbol": ["VZ"],
-    "company": ["Verizon", "Verizon Communications", "Hans Vestberg"],
+    "symbol": [
+      "VZ"
+    ],
+    "company": [
+      "Verizon",
+      "Verizon Communications",
+      "Hans Vestberg"
+    ],
     "weak": []
   },
   "TMUS": {
-    "symbol": ["TMUS"],
-    "company": ["T-Mobile", "T-Mobile US", "Mike Sievert"],
+    "symbol": [
+      "TMUS"
+    ],
+    "company": [
+      "T-Mobile",
+      "T-Mobile US",
+      "Mike Sievert"
+    ],
     "weak": []
   },
   "IPG": {
-    "symbol": ["IPG"],
-    "company": ["Interpublic Group"],
-    "weak": ["McCann", "FCB"]
+    "symbol": [
+      "IPG"
+    ],
+    "company": [
+      "Interpublic Group"
+    ],
+    "weak": [
+      "McCann",
+      "FCB"
+    ]
   },
   "OMC": {
-    "symbol": ["OMC"],
-    "company": ["Omnicom", "Omnicom Group"],
-    "weak": ["BBDO"]
+    "symbol": [
+      "OMC"
+    ],
+    "company": [
+      "Omnicom",
+      "Omnicom Group"
+    ],
+    "weak": [
+      "BBDO"
+    ]
   },
   "UPS": {
-    "symbol": ["UPS"],
-    "company": ["UPS", "United Parcel Service", "Carol Tome"],
+    "symbol": [
+      "UPS"
+    ],
+    "company": [
+      "UPS",
+      "United Parcel Service",
+      "Carol Tome"
+    ],
     "weak": []
   },
   "FDX": {
-    "symbol": ["FDX"],
-    "company": ["FedEx", "FedEx Corporation", "Raj Subramaniam"],
+    "symbol": [
+      "FDX"
+    ],
+    "company": [
+      "FedEx",
+      "FedEx Corporation",
+      "Raj Subramaniam"
+    ],
     "weak": []
   },
   "UNP": {
-    "symbol": ["UNP"],
-    "company": ["Union Pacific", "Union Pacific Railroad"],
+    "symbol": [
+      "UNP"
+    ],
+    "company": [
+      "Union Pacific",
+      "Union Pacific Railroad"
+    ],
     "weak": []
   },
   "NSC": {
-    "symbol": ["NSC"],
-    "company": ["Norfolk Southern", "Norfolk Southern Corporation"],
+    "symbol": [
+      "NSC"
+    ],
+    "company": [
+      "Norfolk Southern",
+      "Norfolk Southern Corporation"
+    ],
     "weak": []
   },
   "CSX": {
-    "symbol": ["CSX"],
-    "company": ["CSX Corporation", "CSX railroad"],
+    "symbol": [
+      "CSX"
+    ],
+    "company": [
+      "CSX Corporation",
+      "CSX railroad"
+    ],
     "weak": []
   },
   "JBHT": {
-    "symbol": ["JBHT"],
-    "company": ["J.B. Hunt", "JB Hunt Transport"],
+    "symbol": [
+      "JBHT"
+    ],
+    "company": [
+      "J.B. Hunt",
+      "JB Hunt Transport"
+    ],
     "weak": []
   },
   "CHRW": {
-    "symbol": ["CHRW"],
-    "company": ["C.H. Robinson", "CH Robinson"],
+    "symbol": [
+      "CHRW"
+    ],
+    "company": [
+      "C.H. Robinson",
+      "CH Robinson"
+    ],
     "weak": []
   },
   "XPO": {
-    "symbol": ["XPO"],
-    "company": ["XPO", "XPO Inc", "XPO Logistics"],
+    "symbol": [
+      "XPO"
+    ],
+    "company": [
+      "XPO",
+      "XPO Inc",
+      "XPO Logistics"
+    ],
     "weak": []
   },
   "EXPD": {
-    "symbol": ["EXPD"],
-    "company": ["Expeditors International", "Expeditors"],
+    "symbol": [
+      "EXPD"
+    ],
+    "company": [
+      "Expeditors International",
+      "Expeditors"
+    ],
     "weak": []
   },
   "GXO": {
-    "symbol": ["GXO"],
-    "company": ["GXO Logistics"],
+    "symbol": [
+      "GXO"
+    ],
+    "company": [
+      "GXO Logistics"
+    ],
     "weak": []
   },
   "WM": {
     "symbol": [],
-    "company": ["Waste Management", "Waste Management Inc"],
+    "company": [
+      "Waste Management",
+      "Waste Management Inc"
+    ],
     "weak": []
   },
   "RSG": {
-    "symbol": ["RSG"],
-    "company": ["Republic Services"],
+    "symbol": [
+      "RSG"
+    ],
+    "company": [
+      "Republic Services"
+    ],
     "weak": []
   },
   "CPRT": {
-    "symbol": ["CPRT"],
-    "company": ["Copart", "Copart Inc"],
+    "symbol": [
+      "CPRT"
+    ],
+    "company": [
+      "Copart",
+      "Copart Inc"
+    ],
     "weak": []
   },
   "AXON": {
-    "symbol": ["AXON"],
-    "company": ["Axon Enterprise"],
-    "weak": ["Taser", "Axon body camera"]
+    "symbol": [
+      "AXON"
+    ],
+    "company": [
+      "Axon Enterprise"
+    ],
+    "weak": [
+      "Taser",
+      "Axon body camera"
+    ]
   },
   "LDOS": {
-    "symbol": ["LDOS"],
-    "company": ["Leidos", "Leidos Holdings"],
+    "symbol": [
+      "LDOS"
+    ],
+    "company": [
+      "Leidos",
+      "Leidos Holdings"
+    ],
     "weak": []
   },
   "LHX": {
-    "symbol": ["LHX"],
-    "company": ["L3Harris", "L3Harris Technologies"],
+    "symbol": [
+      "LHX"
+    ],
+    "company": [
+      "L3Harris",
+      "L3Harris Technologies"
+    ],
     "weak": []
   },
   "TDG": {
-    "symbol": ["TDG"],
-    "company": ["TransDigm", "TransDigm Group"],
+    "symbol": [
+      "TDG"
+    ],
+    "company": [
+      "TransDigm",
+      "TransDigm Group"
+    ],
     "weak": []
   },
   "HWM": {
-    "symbol": ["HWM"],
-    "company": ["Howmet Aerospace"],
+    "symbol": [
+      "HWM"
+    ],
+    "company": [
+      "Howmet Aerospace"
+    ],
     "weak": []
   },
   "TXT": {
-    "symbol": ["TXT"],
-    "company": ["Textron"],
-    "weak": ["Bell helicopter", "Cessna"]
+    "symbol": [
+      "TXT"
+    ],
+    "company": [
+      "Textron"
+    ],
+    "weak": [
+      "Bell helicopter",
+      "Cessna"
+    ]
   },
   "GWW": {
-    "symbol": ["GWW"],
-    "company": ["Grainger", "W.W. Grainger"],
+    "symbol": [
+      "GWW"
+    ],
+    "company": [
+      "Grainger",
+      "W.W. Grainger"
+    ],
     "weak": []
   },
   "SWK": {
-    "symbol": ["SWK"],
-    "company": ["Stanley Black & Decker"],
-    "weak": ["DeWalt", "Black & Decker"]
+    "symbol": [
+      "SWK"
+    ],
+    "company": [
+      "Stanley Black & Decker"
+    ],
+    "weak": [
+      "DeWalt",
+      "Black & Decker"
+    ]
   },
   "ITW": {
-    "symbol": ["ITW"],
-    "company": ["Illinois Tool Works"],
+    "symbol": [
+      "ITW"
+    ],
+    "company": [
+      "Illinois Tool Works"
+    ],
     "weak": []
   },
   "EMR": {
-    "symbol": ["EMR"],
-    "company": ["Emerson Electric", "Emerson"],
+    "symbol": [
+      "EMR"
+    ],
+    "company": [
+      "Emerson Electric",
+      "Emerson"
+    ],
     "weak": []
   },
   "ROK": {
-    "symbol": ["ROK"],
-    "company": ["Rockwell Automation"],
+    "symbol": [
+      "ROK"
+    ],
+    "company": [
+      "Rockwell Automation"
+    ],
     "weak": []
   },
   "PH": {
     "symbol": [],
-    "company": ["Parker Hannifin", "Parker Hannifin Corporation"],
+    "company": [
+      "Parker Hannifin",
+      "Parker Hannifin Corporation"
+    ],
     "weak": []
   },
   "OTIS": {
-    "symbol": ["OTIS"],
-    "company": ["Otis Worldwide"],
-    "weak": ["Otis elevator"]
+    "symbol": [
+      "OTIS"
+    ],
+    "company": [
+      "Otis Worldwide"
+    ],
+    "weak": [
+      "Otis elevator"
+    ]
   },
   "CARR": {
-    "symbol": ["CARR"],
-    "company": ["Carrier Global"],
-    "weak": ["Carrier air conditioning"]
+    "symbol": [
+      "CARR"
+    ],
+    "company": [
+      "Carrier Global"
+    ],
+    "weak": [
+      "Carrier air conditioning"
+    ]
   },
   "TT": {
     "symbol": [],
-    "company": ["Trane Technologies", "Trane"],
-    "weak": ["Thermo King"]
+    "company": [
+      "Trane Technologies",
+      "Trane"
+    ],
+    "weak": [
+      "Thermo King"
+    ]
   },
   "JCI": {
-    "symbol": ["JCI"],
-    "company": ["Johnson Controls", "Johnson Controls International"],
+    "symbol": [
+      "JCI"
+    ],
+    "company": [
+      "Johnson Controls",
+      "Johnson Controls International"
+    ],
     "weak": []
   },
   "ROP": {
-    "symbol": ["ROP"],
-    "company": ["Roper Technologies"],
+    "symbol": [
+      "ROP"
+    ],
+    "company": [
+      "Roper Technologies"
+    ],
     "weak": []
   },
   "AME": {
-    "symbol": ["AME"],
-    "company": ["AMETEK", "AMETEK Inc"],
+    "symbol": [
+      "AME"
+    ],
+    "company": [
+      "AMETEK",
+      "AMETEK Inc"
+    ],
     "weak": []
   },
   "DOV": {
-    "symbol": ["DOV"],
-    "company": ["Dover Corporation"],
+    "symbol": [
+      "DOV"
+    ],
+    "company": [
+      "Dover Corporation"
+    ],
     "weak": []
   },
   "FTV": {
-    "symbol": ["FTV"],
-    "company": ["Fortive", "Fortive Corporation"],
+    "symbol": [
+      "FTV"
+    ],
+    "company": [
+      "Fortive",
+      "Fortive Corporation"
+    ],
     "weak": []
   },
   "IR": {
     "symbol": [],
-    "company": ["Ingersoll Rand"],
+    "company": [
+      "Ingersoll Rand"
+    ],
     "weak": []
   },
   "XYL": {
-    "symbol": ["XYL"],
-    "company": ["Xylem", "Xylem Inc"],
+    "symbol": [
+      "XYL"
+    ],
+    "company": [
+      "Xylem",
+      "Xylem Inc"
+    ],
     "weak": []
   },
   "CAT": {
-    "symbol": ["CAT"],
-    "company": ["Caterpillar", "Caterpillar Inc", "Jim Umpleby"],
+    "symbol": [
+      "CAT"
+    ],
+    "company": [
+      "Caterpillar",
+      "Caterpillar Inc",
+      "Jim Umpleby"
+    ],
     "weak": []
   },
   "DE": {
     "symbol": [],
-    "company": ["John Deere", "Deere & Company"],
-    "weak": ["Deere tractor"]
+    "company": [
+      "John Deere",
+      "Deere & Company"
+    ],
+    "weak": [
+      "Deere tractor"
+    ]
   },
   "GE": {
-    "symbol": ["GE"],
-    "company": ["GE Aerospace", "General Electric", "Larry Culp"],
+    "symbol": [
+      "GE"
+    ],
+    "company": [
+      "GE Aerospace",
+      "General Electric",
+      "Larry Culp"
+    ],
     "weak": []
   },
   "HON": {
-    "symbol": ["HON"],
-    "company": ["Honeywell", "Honeywell International"],
+    "symbol": [
+      "HON"
+    ],
+    "company": [
+      "Honeywell",
+      "Honeywell International"
+    ],
     "weak": []
   },
   "MMM": {
-    "symbol": ["MMM"],
-    "company": ["3M", "3M Company"],
-    "weak": ["Post-it notes"]
+    "symbol": [
+      "MMM"
+    ],
+    "company": [
+      "3M",
+      "3M Company"
+    ],
+    "weak": [
+      "Post-it notes"
+    ]
   },
   "ETN": {
-    "symbol": ["ETN"],
-    "company": ["Eaton", "Eaton Corporation"],
+    "symbol": [
+      "ETN"
+    ],
+    "company": [
+      "Eaton",
+      "Eaton Corporation"
+    ],
     "weak": []
   },
   "PCAR": {
-    "symbol": ["PCAR"],
-    "company": ["PACCAR"],
-    "weak": ["Kenworth", "Peterbilt"]
+    "symbol": [
+      "PCAR"
+    ],
+    "company": [
+      "PACCAR"
+    ],
+    "weak": [
+      "Kenworth",
+      "Peterbilt"
+    ]
   },
   "SAIA": {
-    "symbol": ["SAIA"],
-    "company": ["Saia", "Saia Inc"],
+    "symbol": [
+      "SAIA"
+    ],
+    "company": [
+      "Saia",
+      "Saia Inc"
+    ],
     "weak": []
   },
   "PWR": {
-    "symbol": ["PWR"],
-    "company": ["Quanta Services", "Quanta"],
+    "symbol": [
+      "PWR"
+    ],
+    "company": [
+      "Quanta Services",
+      "Quanta"
+    ],
     "weak": []
   },
   "MTZ": {
-    "symbol": ["MTZ"],
-    "company": ["MasTec", "MasTec Inc"],
+    "symbol": [
+      "MTZ"
+    ],
+    "company": [
+      "MasTec",
+      "MasTec Inc"
+    ],
     "weak": []
   },
   "WAB": {
-    "symbol": ["WAB"],
-    "company": ["Wabtec", "Wabtec Corporation"],
+    "symbol": [
+      "WAB"
+    ],
+    "company": [
+      "Wabtec",
+      "Wabtec Corporation"
+    ],
     "weak": []
   },
   "ACM": {
-    "symbol": ["ACM"],
-    "company": ["AECOM", "AECOM Technology"],
+    "symbol": [
+      "ACM"
+    ],
+    "company": [
+      "AECOM",
+      "AECOM Technology"
+    ],
     "weak": []
   },
   "J": {
     "symbol": [],
-    "company": ["Jacobs Solutions", "Jacobs Engineering"],
+    "company": [
+      "Jacobs Solutions",
+      "Jacobs Engineering"
+    ],
     "weak": []
   },
   "FLR": {
-    "symbol": ["FLR"],
-    "company": ["Fluor Corporation"],
+    "symbol": [
+      "FLR"
+    ],
+    "company": [
+      "Fluor Corporation"
+    ],
     "weak": []
   },
   "KBR": {
-    "symbol": ["KBR"],
-    "company": ["KBR Inc"],
+    "symbol": [
+      "KBR"
+    ],
+    "company": [
+      "KBR Inc"
+    ],
     "weak": []
   },
   "WCC": {
-    "symbol": ["WCC"],
-    "company": ["WESCO International"],
+    "symbol": [
+      "WCC"
+    ],
+    "company": [
+      "WESCO International"
+    ],
     "weak": []
   },
   "GNRC": {
-    "symbol": ["GNRC"],
-    "company": ["Generac", "Generac Holdings"],
+    "symbol": [
+      "GNRC"
+    ],
+    "company": [
+      "Generac",
+      "Generac Holdings"
+    ],
     "weak": []
   },
   "HUBB": {
-    "symbol": ["HUBB"],
-    "company": ["Hubbell", "Hubbell Inc"],
+    "symbol": [
+      "HUBB"
+    ],
+    "company": [
+      "Hubbell",
+      "Hubbell Inc"
+    ],
     "weak": []
   },
   "NDSN": {
-    "symbol": ["NDSN"],
-    "company": ["Nordson", "Nordson Corporation"],
+    "symbol": [
+      "NDSN"
+    ],
+    "company": [
+      "Nordson",
+      "Nordson Corporation"
+    ],
     "weak": []
   },
   "BA": {
-    "symbol": ["BA"],
-    "company": ["Boeing", "Boeing Company", "Kelly Ortberg"],
-    "weak": ["737 MAX", "Air Force One", "Boeing Defense"]
+    "symbol": [
+      "BA"
+    ],
+    "company": [
+      "Boeing",
+      "Boeing Company",
+      "Kelly Ortberg"
+    ],
+    "weak": [
+      "737 MAX",
+      "Air Force One",
+      "Boeing Defense"
+    ]
   },
   "LMT": {
-    "symbol": ["LMT"],
-    "company": ["Lockheed Martin", "Lockheed", "Lockheed Martin Corporation"],
-    "weak": ["F-35", "F-22"]
+    "symbol": [
+      "LMT"
+    ],
+    "company": [
+      "Lockheed Martin",
+      "Lockheed",
+      "Lockheed Martin Corporation"
+    ],
+    "weak": [
+      "F-35",
+      "F-22"
+    ]
   },
   "RTX": {
-    "symbol": ["RTX"],
-    "company": ["Raytheon", "RTX Corporation", "Pratt Whitney", "Collins Aerospace"],
+    "symbol": [
+      "RTX"
+    ],
+    "company": [
+      "Raytheon",
+      "RTX Corporation",
+      "Pratt Whitney",
+      "Collins Aerospace"
+    ],
     "weak": []
   },
   "NOC": {
-    "symbol": ["NOC"],
-    "company": ["Northrop Grumman", "Northrop"],
-    "weak": ["B-21 bomber"]
+    "symbol": [
+      "NOC"
+    ],
+    "company": [
+      "Northrop Grumman",
+      "Northrop"
+    ],
+    "weak": [
+      "B-21 bomber"
+    ]
   },
   "GD": {
     "symbol": [],
-    "company": ["General Dynamics", "General Dynamics Corporation", "Gulfstream"],
+    "company": [
+      "General Dynamics",
+      "General Dynamics Corporation",
+      "Gulfstream"
+    ],
     "weak": []
   },
   "HII": {
-    "symbol": ["HII"],
-    "company": ["Huntington Ingalls", "Newport News Shipbuilding"],
+    "symbol": [
+      "HII"
+    ],
+    "company": [
+      "Huntington Ingalls",
+      "Newport News Shipbuilding"
+    ],
     "weak": []
   },
   "XOM": {
-    "symbol": ["XOM"],
-    "company": ["ExxonMobil", "Exxon", "Mobil", "ExxonMobil Corporation"],
-    "weak": ["drill baby drill"]
+    "symbol": [
+      "XOM"
+    ],
+    "company": [
+      "ExxonMobil",
+      "Exxon",
+      "Mobil",
+      "ExxonMobil Corporation"
+    ],
+    "weak": [
+      "drill baby drill"
+    ]
   },
   "CVX": {
-    "symbol": ["CVX"],
-    "company": ["Chevron", "Chevron Corporation"],
+    "symbol": [
+      "CVX"
+    ],
+    "company": [
+      "Chevron",
+      "Chevron Corporation"
+    ],
     "weak": []
   },
   "COP": {
-    "symbol": ["COP"],
-    "company": ["ConocoPhillips", "Conoco"],
+    "symbol": [
+      "COP"
+    ],
+    "company": [
+      "ConocoPhillips",
+      "Conoco"
+    ],
     "weak": []
   },
   "OXY": {
-    "symbol": ["OXY"],
-    "company": ["Occidental Petroleum", "Occidental", "Oxy Petroleum"],
+    "symbol": [
+      "OXY"
+    ],
+    "company": [
+      "Occidental Petroleum",
+      "Occidental",
+      "Oxy Petroleum"
+    ],
     "weak": []
   },
   "SLB": {
-    "symbol": ["SLB"],
-    "company": ["Schlumberger"],
+    "symbol": [
+      "SLB"
+    ],
+    "company": [
+      "Schlumberger"
+    ],
     "weak": []
   },
   "HAL": {
-    "symbol": ["HAL"],
-    "company": ["Halliburton", "Halliburton Company"],
+    "symbol": [
+      "HAL"
+    ],
+    "company": [
+      "Halliburton",
+      "Halliburton Company"
+    ],
     "weak": []
   },
   "BKR": {
-    "symbol": ["BKR"],
-    "company": ["Baker Hughes"],
+    "symbol": [
+      "BKR"
+    ],
+    "company": [
+      "Baker Hughes"
+    ],
     "weak": []
   },
   "MPC": {
-    "symbol": ["MPC"],
-    "company": ["Marathon Petroleum"],
+    "symbol": [
+      "MPC"
+    ],
+    "company": [
+      "Marathon Petroleum"
+    ],
     "weak": []
   },
   "VLO": {
-    "symbol": ["VLO"],
-    "company": ["Valero", "Valero Energy"],
+    "symbol": [
+      "VLO"
+    ],
+    "company": [
+      "Valero",
+      "Valero Energy"
+    ],
     "weak": []
   },
   "PSX": {
-    "symbol": ["PSX"],
-    "company": ["Phillips 66"],
+    "symbol": [
+      "PSX"
+    ],
+    "company": [
+      "Phillips 66"
+    ],
     "weak": []
   },
   "DVN": {
-    "symbol": ["DVN"],
-    "company": ["Devon Energy"],
+    "symbol": [
+      "DVN"
+    ],
+    "company": [
+      "Devon Energy"
+    ],
     "weak": []
   },
   "FANG": {
-    "symbol": ["FANG"],
-    "company": ["Diamondback Energy"],
+    "symbol": [
+      "FANG"
+    ],
+    "company": [
+      "Diamondback Energy"
+    ],
     "weak": []
   },
   "CTRA": {
-    "symbol": ["CTRA"],
-    "company": ["Coterra Energy"],
+    "symbol": [
+      "CTRA"
+    ],
+    "company": [
+      "Coterra Energy"
+    ],
     "weak": []
   },
   "APA": {
-    "symbol": ["APA"],
-    "company": ["APA Corp", "Apache Corporation"],
+    "symbol": [
+      "APA"
+    ],
+    "company": [
+      "APA Corp",
+      "Apache Corporation"
+    ],
     "weak": []
   },
   "EQT": {
-    "symbol": ["EQT"],
-    "company": ["EQT Corp", "EQT Corporation"],
+    "symbol": [
+      "EQT"
+    ],
+    "company": [
+      "EQT Corp",
+      "EQT Corporation"
+    ],
     "weak": []
   },
   "MRO": {
-    "symbol": ["MRO"],
-    "company": ["Marathon Oil"],
+    "symbol": [
+      "MRO"
+    ],
+    "company": [
+      "Marathon Oil"
+    ],
     "weak": []
   },
   "HES": {
-    "symbol": ["HES"],
-    "company": ["Hess Corporation"],
+    "symbol": [
+      "HES"
+    ],
+    "company": [
+      "Hess Corporation"
+    ],
     "weak": []
   },
   "KMI": {
-    "symbol": ["KMI"],
-    "company": ["Kinder Morgan", "Kinder Morgan Inc"],
+    "symbol": [
+      "KMI"
+    ],
+    "company": [
+      "Kinder Morgan",
+      "Kinder Morgan Inc"
+    ],
     "weak": []
   },
   "WMB": {
-    "symbol": ["WMB"],
-    "company": ["Williams Companies"],
+    "symbol": [
+      "WMB"
+    ],
+    "company": [
+      "Williams Companies"
+    ],
     "weak": []
   },
   "OKE": {
-    "symbol": ["OKE"],
-    "company": ["ONEOK", "ONEOK Inc"],
+    "symbol": [
+      "OKE"
+    ],
+    "company": [
+      "ONEOK",
+      "ONEOK Inc"
+    ],
     "weak": []
   },
   "LNG": {
-    "symbol": ["LNG"],
-    "company": ["Cheniere Energy"],
-    "weak": ["liquefied natural gas"]
+    "symbol": [
+      "LNG"
+    ],
+    "company": [
+      "Cheniere Energy"
+    ],
+    "weak": [
+      "liquefied natural gas"
+    ]
   },
   "TRGP": {
-    "symbol": ["TRGP"],
-    "company": ["Targa Resources"],
+    "symbol": [
+      "TRGP"
+    ],
+    "company": [
+      "Targa Resources"
+    ],
     "weak": []
   },
   "RRC": {
-    "symbol": ["RRC"],
-    "company": ["Range Resources"],
+    "symbol": [
+      "RRC"
+    ],
+    "company": [
+      "Range Resources"
+    ],
     "weak": []
   },
   "NEE": {
-    "symbol": ["NEE"],
-    "company": ["NextEra Energy"],
-    "weak": ["Florida Power & Light"]
+    "symbol": [
+      "NEE"
+    ],
+    "company": [
+      "NextEra Energy"
+    ],
+    "weak": [
+      "Florida Power & Light"
+    ]
   },
   "SO": {
     "symbol": [],
-    "company": ["Southern Company"],
-    "weak": ["Georgia Power"]
+    "company": [
+      "Southern Company"
+    ],
+    "weak": [
+      "Georgia Power"
+    ]
   },
   "DUK": {
-    "symbol": ["DUK"],
-    "company": ["Duke Energy", "Duke Energy Corporation"],
+    "symbol": [
+      "DUK"
+    ],
+    "company": [
+      "Duke Energy",
+      "Duke Energy Corporation"
+    ],
     "weak": []
   },
   "D": {
     "symbol": [],
-    "company": ["Dominion Energy", "Dominion Virginia Power"],
+    "company": [
+      "Dominion Energy",
+      "Dominion Virginia Power"
+    ],
     "weak": []
   },
   "AEP": {
-    "symbol": ["AEP"],
-    "company": ["American Electric Power"],
+    "symbol": [
+      "AEP"
+    ],
+    "company": [
+      "American Electric Power"
+    ],
     "weak": []
   },
   "XEL": {
-    "symbol": ["XEL"],
-    "company": ["Xcel Energy"],
+    "symbol": [
+      "XEL"
+    ],
+    "company": [
+      "Xcel Energy"
+    ],
     "weak": []
   },
   "EXC": {
-    "symbol": ["EXC"],
-    "company": ["Exelon", "Exelon Corporation"],
+    "symbol": [
+      "EXC"
+    ],
+    "company": [
+      "Exelon",
+      "Exelon Corporation"
+    ],
     "weak": []
   },
   "PCG": {
-    "symbol": ["PCG"],
-    "company": ["PG&E", "Pacific Gas and Electric"],
+    "symbol": [
+      "PCG"
+    ],
+    "company": [
+      "PG&E",
+      "Pacific Gas and Electric"
+    ],
     "weak": []
   },
   "SRE": {
-    "symbol": ["SRE"],
-    "company": ["Sempra", "Sempra Energy"],
+    "symbol": [
+      "SRE"
+    ],
+    "company": [
+      "Sempra",
+      "Sempra Energy"
+    ],
     "weak": []
   },
   "ETR": {
-    "symbol": ["ETR"],
-    "company": ["Entergy", "Entergy Corporation"],
+    "symbol": [
+      "ETR"
+    ],
+    "company": [
+      "Entergy",
+      "Entergy Corporation"
+    ],
     "weak": []
   },
   "CEG": {
-    "symbol": ["CEG"],
-    "company": ["Constellation Energy"],
-    "weak": ["Constellation nuclear"]
+    "symbol": [
+      "CEG"
+    ],
+    "company": [
+      "Constellation Energy"
+    ],
+    "weak": [
+      "nuclear power plant",
+      "nuclear energy",
+      "Constellation nuclear"
+    ]
   },
   "EIX": {
-    "symbol": ["EIX"],
-    "company": ["Edison International", "Southern California Edison"],
+    "symbol": [
+      "EIX"
+    ],
+    "company": [
+      "Edison International",
+      "Southern California Edison"
+    ],
     "weak": []
   },
   "WEC": {
-    "symbol": ["WEC"],
-    "company": ["WEC Energy"],
+    "symbol": [
+      "WEC"
+    ],
+    "company": [
+      "WEC Energy"
+    ],
     "weak": []
   },
   "ED": {
     "symbol": [],
-    "company": ["Consolidated Edison", "ConEd"],
+    "company": [
+      "Consolidated Edison",
+      "ConEd"
+    ],
     "weak": []
   },
   "AWK": {
-    "symbol": ["AWK"],
-    "company": ["American Water Works"],
+    "symbol": [
+      "AWK"
+    ],
+    "company": [
+      "American Water Works"
+    ],
     "weak": []
   },
   "ES": {
     "symbol": [],
-    "company": ["Eversource Energy", "Eversource"],
+    "company": [
+      "Eversource Energy",
+      "Eversource"
+    ],
     "weak": []
   },
   "CMS": {
-    "symbol": ["CMS"],
-    "company": ["CMS Energy", "Consumers Energy"],
+    "symbol": [
+      "CMS"
+    ],
+    "company": [
+      "CMS Energy",
+      "Consumers Energy"
+    ],
     "weak": []
   },
   "PEG": {
-    "symbol": ["PEG"],
-    "company": ["PSEG", "Public Service Enterprise Group"],
+    "symbol": [
+      "PEG"
+    ],
+    "company": [
+      "PSEG",
+      "Public Service Enterprise Group"
+    ],
     "weak": []
   },
   "PPL": {
-    "symbol": ["PPL"],
-    "company": ["PPL Corporation"],
+    "symbol": [
+      "PPL"
+    ],
+    "company": [
+      "PPL Corporation"
+    ],
     "weak": []
   },
   "DTE": {
-    "symbol": ["DTE"],
-    "company": ["DTE Energy"],
+    "symbol": [
+      "DTE"
+    ],
+    "company": [
+      "DTE Energy"
+    ],
     "weak": []
   },
   "NI": {
     "symbol": [],
-    "company": ["NiSource"],
+    "company": [
+      "NiSource"
+    ],
     "weak": []
   },
   "AEE": {
-    "symbol": ["AEE"],
-    "company": ["Ameren", "Ameren Corporation"],
+    "symbol": [
+      "AEE"
+    ],
+    "company": [
+      "Ameren",
+      "Ameren Corporation"
+    ],
     "weak": []
   },
   "LNT": {
-    "symbol": ["LNT"],
-    "company": ["Alliant Energy"],
+    "symbol": [
+      "LNT"
+    ],
+    "company": [
+      "Alliant Energy"
+    ],
     "weak": []
   },
   "EVRG": {
-    "symbol": ["EVRG"],
-    "company": ["Evergy"],
+    "symbol": [
+      "EVRG"
+    ],
+    "company": [
+      "Evergy"
+    ],
     "weak": []
   },
   "NRG": {
-    "symbol": ["NRG"],
-    "company": ["NRG Energy"],
+    "symbol": [
+      "NRG"
+    ],
+    "company": [
+      "NRG Energy"
+    ],
     "weak": []
   },
   "VST": {
-    "symbol": ["VST"],
-    "company": ["Vistra", "Vistra Corp"],
+    "symbol": [
+      "VST"
+    ],
+    "company": [
+      "Vistra",
+      "Vistra Corp"
+    ],
     "weak": []
   },
   "ATO": {
-    "symbol": ["ATO"],
-    "company": ["Atmos Energy"],
+    "symbol": [
+      "ATO"
+    ],
+    "company": [
+      "Atmos Energy"
+    ],
     "weak": []
   },
   "CNP": {
-    "symbol": ["CNP"],
-    "company": ["CenterPoint Energy"],
+    "symbol": [
+      "CNP"
+    ],
+    "company": [
+      "CenterPoint Energy"
+    ],
     "weak": []
   },
   "AMT": {
-    "symbol": ["AMT"],
-    "company": ["American Tower", "American Tower Corporation"],
+    "symbol": [
+      "AMT"
+    ],
+    "company": [
+      "American Tower",
+      "American Tower Corporation"
+    ],
     "weak": []
   },
   "PLD": {
-    "symbol": ["PLD"],
-    "company": ["Prologis", "Prologis Inc"],
+    "symbol": [
+      "PLD"
+    ],
+    "company": [
+      "Prologis",
+      "Prologis Inc"
+    ],
     "weak": []
   },
   "EQIX": {
-    "symbol": ["EQIX"],
-    "company": ["Equinix", "Equinix Inc"],
+    "symbol": [
+      "EQIX"
+    ],
+    "company": [
+      "Equinix",
+      "Equinix Inc"
+    ],
     "weak": []
   },
   "CCI": {
-    "symbol": ["CCI"],
-    "company": ["Crown Castle", "Crown Castle International"],
+    "symbol": [
+      "CCI"
+    ],
+    "company": [
+      "Crown Castle",
+      "Crown Castle International"
+    ],
     "weak": []
   },
   "SPG": {
-    "symbol": ["SPG"],
-    "company": ["Simon Property Group"],
-    "weak": ["Simon mall"]
+    "symbol": [
+      "SPG"
+    ],
+    "company": [
+      "Simon Property Group"
+    ],
+    "weak": [
+      "Simon mall"
+    ]
   },
   "VICI": {
-    "symbol": ["VICI"],
-    "company": ["VICI Properties"],
-    "weak": ["casino REIT"]
+    "symbol": [
+      "VICI"
+    ],
+    "company": [
+      "VICI Properties"
+    ],
+    "weak": [
+      "casino REIT"
+    ]
   },
   "O": {
     "symbol": [],
-    "company": ["Realty Income", "Realty Income Corporation"],
+    "company": [
+      "Realty Income",
+      "Realty Income Corporation"
+    ],
     "weak": []
   },
   "PSA": {
-    "symbol": ["PSA"],
-    "company": ["Public Storage"],
+    "symbol": [
+      "PSA"
+    ],
+    "company": [
+      "Public Storage"
+    ],
     "weak": []
   },
   "EXR": {
-    "symbol": ["EXR"],
-    "company": ["Extra Space Storage"],
+    "symbol": [
+      "EXR"
+    ],
+    "company": [
+      "Extra Space Storage"
+    ],
     "weak": []
   },
   "AVB": {
-    "symbol": ["AVB"],
-    "company": ["AvalonBay", "AvalonBay Communities"],
+    "symbol": [
+      "AVB"
+    ],
+    "company": [
+      "AvalonBay",
+      "AvalonBay Communities"
+    ],
     "weak": []
   },
   "EQR": {
-    "symbol": ["EQR"],
-    "company": ["Equity Residential"],
+    "symbol": [
+      "EQR"
+    ],
+    "company": [
+      "Equity Residential"
+    ],
     "weak": []
   },
   "MAA": {
-    "symbol": ["MAA"],
-    "company": ["Mid-America Apartment"],
+    "symbol": [
+      "MAA"
+    ],
+    "company": [
+      "Mid-America Apartment"
+    ],
     "weak": []
   },
   "INVH": {
-    "symbol": ["INVH"],
-    "company": ["Invitation Homes"],
+    "symbol": [
+      "INVH"
+    ],
+    "company": [
+      "Invitation Homes"
+    ],
     "weak": []
   },
   "ARE": {
     "symbol": [],
-    "company": ["Alexandria Real Estate"],
+    "company": [
+      "Alexandria Real Estate"
+    ],
     "weak": []
   },
   "BXP": {
-    "symbol": ["BXP"],
-    "company": ["Boston Properties"],
+    "symbol": [
+      "BXP"
+    ],
+    "company": [
+      "Boston Properties"
+    ],
     "weak": []
   },
   "HST": {
-    "symbol": ["HST"],
-    "company": ["Host Hotels", "Host Hotels & Resorts"],
+    "symbol": [
+      "HST"
+    ],
+    "company": [
+      "Host Hotels",
+      "Host Hotels & Resorts"
+    ],
     "weak": []
   },
   "KIM": {
-    "symbol": ["KIM"],
-    "company": ["Kimco Realty"],
+    "symbol": [
+      "KIM"
+    ],
+    "company": [
+      "Kimco Realty"
+    ],
     "weak": []
   },
   "REG": {
-    "symbol": ["REG"],
-    "company": ["Regency Centers"],
+    "symbol": [
+      "REG"
+    ],
+    "company": [
+      "Regency Centers"
+    ],
     "weak": []
   },
   "NNN": {
-    "symbol": ["NNN"],
-    "company": ["NNN REIT"],
+    "symbol": [
+      "NNN"
+    ],
+    "company": [
+      "NNN REIT"
+    ],
     "weak": []
   },
   "GLPI": {
-    "symbol": ["GLPI"],
-    "company": ["Gaming and Leisure Properties"],
+    "symbol": [
+      "GLPI"
+    ],
+    "company": [
+      "Gaming and Leisure Properties"
+    ],
     "weak": []
   },
   "REXR": {
-    "symbol": ["REXR"],
-    "company": ["Rexford Industrial"],
+    "symbol": [
+      "REXR"
+    ],
+    "company": [
+      "Rexford Industrial"
+    ],
     "weak": []
   },
   "LIN": {
-    "symbol": ["LIN"],
-    "company": ["Linde", "Linde plc"],
-    "weak": ["industrial gas"]
+    "symbol": [
+      "LIN"
+    ],
+    "company": [
+      "Linde",
+      "Linde plc"
+    ],
+    "weak": [
+      "industrial gas"
+    ]
   },
   "APD": {
-    "symbol": ["APD"],
-    "company": ["Air Products", "Air Products and Chemicals"],
+    "symbol": [
+      "APD"
+    ],
+    "company": [
+      "Air Products",
+      "Air Products and Chemicals"
+    ],
     "weak": []
   },
   "SHW": {
-    "symbol": ["SHW"],
-    "company": ["Sherwin-Williams"],
-    "weak": ["Sherwin Williams paint"]
+    "symbol": [
+      "SHW"
+    ],
+    "company": [
+      "Sherwin-Williams"
+    ],
+    "weak": [
+      "Sherwin Williams paint"
+    ]
   },
   "ECL": {
-    "symbol": ["ECL"],
-    "company": ["Ecolab", "Ecolab Inc"],
+    "symbol": [
+      "ECL"
+    ],
+    "company": [
+      "Ecolab",
+      "Ecolab Inc"
+    ],
     "weak": []
   },
   "DOW": {
-    "symbol": ["DOW"],
-    "company": ["Dow Inc", "Dow Chemical"],
+    "symbol": [
+      "DOW"
+    ],
+    "company": [
+      "Dow Inc",
+      "Dow Chemical"
+    ],
     "weak": []
   },
   "DD": {
     "symbol": [],
-    "company": ["DuPont", "DuPont de Nemours"],
+    "company": [
+      "DuPont",
+      "DuPont de Nemours"
+    ],
     "weak": []
   },
   "PPG": {
-    "symbol": ["PPG"],
-    "company": ["PPG Industries"],
+    "symbol": [
+      "PPG"
+    ],
+    "company": [
+      "PPG Industries"
+    ],
     "weak": []
   },
   "IFF": {
-    "symbol": ["IFF"],
-    "company": ["International Flavors"],
-    "weak": ["IFF fragrance"]
+    "symbol": [
+      "IFF"
+    ],
+    "company": [
+      "International Flavors"
+    ],
+    "weak": [
+      "IFF fragrance"
+    ]
   },
   "CE": {
     "symbol": [],
-    "company": ["Celanese", "Celanese Corporation"],
+    "company": [
+      "Celanese",
+      "Celanese Corporation"
+    ],
     "weak": []
   },
   "ALB": {
-    "symbol": ["ALB"],
-    "company": ["Albemarle", "Albemarle Corporation"],
-    "weak": ["lithium producer"]
+    "symbol": [
+      "ALB"
+    ],
+    "company": [
+      "Albemarle",
+      "Albemarle Corporation"
+    ],
+    "weak": [
+      "lithium producer"
+    ]
   },
   "RPM": {
-    "symbol": ["RPM"],
-    "company": ["RPM International"],
-    "weak": ["Rust-Oleum", "Tremco"]
+    "symbol": [
+      "RPM"
+    ],
+    "company": [
+      "RPM International"
+    ],
+    "weak": [
+      "Rust-Oleum",
+      "Tremco"
+    ]
   },
   "EMN": {
-    "symbol": ["EMN"],
-    "company": ["Eastman Chemical"],
+    "symbol": [
+      "EMN"
+    ],
+    "company": [
+      "Eastman Chemical"
+    ],
     "weak": []
   },
   "CF": {
     "symbol": [],
-    "company": ["CF Industries"],
-    "weak": ["nitrogen fertilizer"]
+    "company": [
+      "CF Industries"
+    ],
+    "weak": [
+      "nitrogen fertilizer"
+    ]
   },
   "IP": {
     "symbol": [],
-    "company": ["International Paper"],
+    "company": [
+      "International Paper"
+    ],
     "weak": []
   },
   "PKG": {
-    "symbol": ["PKG"],
-    "company": ["Packaging Corporation"],
+    "symbol": [
+      "PKG"
+    ],
+    "company": [
+      "Packaging Corporation"
+    ],
     "weak": []
   },
   "BALL": {
     "symbol": [],
-    "company": ["Ball Corporation"],
-    "weak": ["Ball aluminum cans"]
+    "company": [
+      "Ball Corporation"
+    ],
+    "weak": [
+      "Ball aluminum cans"
+    ]
   },
   "AVY": {
-    "symbol": ["AVY"],
-    "company": ["Avery Dennison"],
+    "symbol": [
+      "AVY"
+    ],
+    "company": [
+      "Avery Dennison"
+    ],
     "weak": []
   },
   "SEE": {
     "symbol": [],
-    "company": ["Sealed Air"],
-    "weak": ["Cryovac packaging"]
+    "company": [
+      "Sealed Air"
+    ],
+    "weak": [
+      "Cryovac packaging"
+    ]
   },
   "AMCR": {
-    "symbol": ["AMCR"],
-    "company": ["Amcor", "Amcor packaging"],
+    "symbol": [
+      "AMCR"
+    ],
+    "company": [
+      "Amcor",
+      "Amcor packaging"
+    ],
     "weak": []
   },
   "STLD": {
-    "symbol": ["STLD"],
-    "company": ["Steel Dynamics"],
+    "symbol": [
+      "STLD"
+    ],
+    "company": [
+      "Steel Dynamics"
+    ],
     "weak": []
   },
   "OLN": {
-    "symbol": ["OLN"],
-    "company": ["Olin Corporation"],
-    "weak": ["Winchester ammunition"]
+    "symbol": [
+      "OLN"
+    ],
+    "company": [
+      "Olin Corporation"
+    ],
+    "weak": [
+      "Winchester ammunition"
+    ]
   },
   "FCX": {
-    "symbol": ["FCX"],
-    "company": ["Freeport-McMoRan", "Freeport"],
-    "weak": ["Grasberg mine", "copper mining"]
+    "symbol": [
+      "FCX"
+    ],
+    "company": [
+      "Freeport-McMoRan",
+      "Freeport"
+    ],
+    "weak": [
+      "Grasberg mine",
+      "copper mining"
+    ]
   },
   "AA": {
     "symbol": [],
-    "company": ["Alcoa", "Alcoa Corporation", "William Oplinger"],
+    "company": [
+      "Alcoa",
+      "Alcoa Corporation",
+      "William Oplinger"
+    ],
     "weak": []
   },
   "NUE": {
-    "symbol": ["NUE"],
-    "company": ["Nucor", "Nucor Corporation"],
+    "symbol": [
+      "NUE"
+    ],
+    "company": [
+      "Nucor",
+      "Nucor Corporation"
+    ],
     "weak": []
   },
   "CLF": {
-    "symbol": ["CLF"],
-    "company": ["Cleveland-Cliffs"],
+    "symbol": [
+      "CLF"
+    ],
+    "company": [
+      "Cleveland-Cliffs"
+    ],
     "weak": []
   },
   "X": {
     "symbol": [],
-    "company": ["US Steel", "United States Steel", "Nippon Steel"],
-    "weak": ["USS steel"]
+    "company": [
+      "US Steel",
+      "United States Steel",
+      "Nippon Steel"
+    ],
+    "weak": [
+      "USS steel"
+    ]
   },
   "ADM": {
-    "symbol": ["ADM"],
-    "company": ["Archer-Daniels-Midland", "Archer Daniels"],
+    "symbol": [
+      "ADM"
+    ],
+    "company": [
+      "Archer-Daniels-Midland",
+      "Archer Daniels"
+    ],
     "weak": []
   },
   "MOS": {
-    "symbol": ["MOS"],
-    "company": ["Mosaic", "Mosaic Company"],
+    "symbol": [
+      "MOS"
+    ],
+    "company": [
+      "Mosaic",
+      "Mosaic Company"
+    ],
     "weak": []
   },
   "BABA": {
-    "symbol": ["BABA"],
-    "company": ["Alibaba", "Alibaba Group", "Jack Ma"],
-    "weak": ["AliExpress", "Taobao"]
+    "symbol": [
+      "BABA"
+    ],
+    "company": [
+      "Alibaba",
+      "Alibaba Group",
+      "Jack Ma"
+    ],
+    "weak": [
+      "AliExpress",
+      "Taobao"
+    ]
   },
   "BIDU": {
-    "symbol": ["BIDU"],
-    "company": ["Baidu", "Baidu Inc", "Robin Li"],
+    "symbol": [
+      "BIDU"
+    ],
+    "company": [
+      "Baidu",
+      "Baidu Inc",
+      "Robin Li"
+    ],
     "weak": []
   },
   "PDD": {
-    "symbol": ["PDD"],
-    "company": ["PDD Holdings", "Pinduoduo"],
-    "weak": ["Temu"]
+    "symbol": [
+      "PDD"
+    ],
+    "company": [
+      "PDD Holdings",
+      "Pinduoduo"
+    ],
+    "weak": [
+      "Temu"
+    ]
   },
   "NIO": {
-    "symbol": ["NIO"],
-    "company": ["Nio", "Nio Inc", "William Li"],
+    "symbol": [
+      "NIO"
+    ],
+    "company": [
+      "Nio",
+      "Nio Inc",
+      "William Li"
+    ],
     "weak": []
   },
   "JD": {
     "symbol": [],
-    "company": ["JD.com", "JD Logistics", "Jingdong", "Richard Liu"],
+    "company": [
+      "JD.com",
+      "JD Logistics",
+      "Jingdong",
+      "Richard Liu"
+    ],
     "weak": []
   },
   "XPEV": {
-    "symbol": ["XPEV"],
-    "company": ["Xpeng", "XPeng Motors"],
+    "symbol": [
+      "XPEV"
+    ],
+    "company": [
+      "Xpeng",
+      "XPeng Motors"
+    ],
     "weak": []
   },
   "LI": {
     "symbol": [],
-    "company": ["Li Auto", "Li Auto Inc", "Li Xiang"],
+    "company": [
+      "Li Auto",
+      "Li Auto Inc",
+      "Li Xiang"
+    ],
     "weak": []
   },
   "RKLB": {
-    "symbol": ["RKLB"],
-    "company": ["Rocket Lab", "Rocket Lab USA", "Peter Beck"],
+    "symbol": [
+      "RKLB"
+    ],
+    "company": [
+      "Rocket Lab",
+      "Rocket Lab USA",
+      "Peter Beck"
+    ],
     "weak": []
   },
   "LUNR": {
-    "symbol": ["LUNR"],
-    "company": ["Intuitive Machines"],
+    "symbol": [
+      "LUNR"
+    ],
+    "company": [
+      "Intuitive Machines"
+    ],
     "weak": []
   },
   "SPCE": {
-    "symbol": ["SPCE"],
-    "company": ["Virgin Galactic", "Richard Branson"],
+    "symbol": [
+      "SPCE"
+    ],
+    "company": [
+      "Virgin Galactic",
+      "Richard Branson"
+    ],
     "weak": []
   },
   "ASTS": {
-    "symbol": ["ASTS"],
-    "company": ["AST SpaceMobile"],
+    "symbol": [
+      "ASTS"
+    ],
+    "company": [
+      "AST SpaceMobile"
+    ],
     "weak": []
   },
   "MGM": {
-    "symbol": ["MGM"],
-    "company": ["MGM Resorts"],
-    "weak": ["MGM Grand", "Bellagio"]
+    "symbol": [
+      "MGM"
+    ],
+    "company": [
+      "MGM Resorts"
+    ],
+    "weak": [
+      "MGM Grand",
+      "Bellagio"
+    ]
   },
   "LVS": {
-    "symbol": ["LVS"],
-    "company": ["Las Vegas Sands", "Sheldon Adelson"],
+    "symbol": [
+      "LVS"
+    ],
+    "company": [
+      "Las Vegas Sands",
+      "Sheldon Adelson"
+    ],
     "weak": []
   },
   "WYNN": {
-    "symbol": ["WYNN"],
-    "company": ["Wynn Resorts"],
-    "weak": ["Steve Wynn", "Wynn Las Vegas"]
+    "symbol": [
+      "WYNN"
+    ],
+    "company": [
+      "Wynn Resorts"
+    ],
+    "weak": [
+      "Steve Wynn",
+      "Wynn Las Vegas"
+    ]
   },
   "CZR": {
-    "symbol": ["CZR"],
-    "company": ["Caesars Entertainment", "Caesars Palace"],
+    "symbol": [
+      "CZR"
+    ],
+    "company": [
+      "Caesars Entertainment",
+      "Caesars Palace"
+    ],
     "weak": []
   },
   "DAL": {
-    "symbol": ["DAL"],
-    "company": ["Delta Air Lines", "Delta Airlines", "Ed Bastian"],
+    "symbol": [
+      "DAL"
+    ],
+    "company": [
+      "Delta Air Lines",
+      "Delta Airlines",
+      "Ed Bastian"
+    ],
     "weak": []
   },
   "UAL": {
-    "symbol": ["UAL"],
-    "company": ["United Airlines", "Scott Kirby"],
+    "symbol": [
+      "UAL"
+    ],
+    "company": [
+      "United Airlines",
+      "Scott Kirby"
+    ],
     "weak": []
   },
   "AAL": {
-    "symbol": ["AAL"],
-    "company": ["American Airlines", "Robert Isom"],
+    "symbol": [
+      "AAL"
+    ],
+    "company": [
+      "American Airlines",
+      "Robert Isom"
+    ],
     "weak": []
   },
   "LUV": {
-    "symbol": ["LUV"],
-    "company": ["Southwest Airlines"],
+    "symbol": [
+      "LUV"
+    ],
+    "company": [
+      "Southwest Airlines"
+    ],
     "weak": []
   },
   "ALK": {
-    "symbol": ["ALK"],
-    "company": ["Alaska Airlines", "Ben Minicucci"],
+    "symbol": [
+      "ALK"
+    ],
+    "company": [
+      "Alaska Airlines",
+      "Ben Minicucci"
+    ],
     "weak": []
   },
-
   "ENPH": {
-    "symbol": ["ENPH"],
-    "company": ["Enphase Energy", "Enphase"],
-    "weak": ["solar inverter", "rooftop solar", "residential solar"]
+    "symbol": [
+      "ENPH"
+    ],
+    "company": [
+      "Enphase Energy",
+      "Enphase"
+    ],
+    "weak": [
+      "solar inverter",
+      "rooftop solar",
+      "residential solar"
+    ]
   },
   "SEDG": {
-    "symbol": ["SEDG"],
-    "company": ["SolarEdge", "SolarEdge Technologies"],
-    "weak": ["solar power optimizer"]
+    "symbol": [
+      "SEDG"
+    ],
+    "company": [
+      "SolarEdge",
+      "SolarEdge Technologies"
+    ],
+    "weak": [
+      "solar power optimizer"
+    ]
   },
   "FSLR": {
-    "symbol": ["FSLR"],
-    "company": ["First Solar", "First Solar Inc"],
-    "weak": ["thin-film solar", "US solar manufacturer", "cadmium telluride"]
+    "symbol": [
+      "FSLR"
+    ],
+    "company": [
+      "First Solar",
+      "First Solar Inc"
+    ],
+    "weak": [
+      "thin-film solar",
+      "US solar manufacturer",
+      "cadmium telluride"
+    ]
   },
   "SUNRUN": {
-    "symbol": ["RUN"],
-    "company": ["Sunrun", "Sunrun Inc"],
-    "weak": ["residential solar lease"]
+    "symbol": [
+      "RUN"
+    ],
+    "company": [
+      "Sunrun",
+      "Sunrun Inc"
+    ],
+    "weak": [
+      "residential solar lease"
+    ]
   },
-
   "CCJ": {
-    "symbol": ["CCJ"],
-    "company": ["Cameco", "Cameco Corporation"],
-    "weak": ["uranium miner", "nuclear fuel", "uranium enrichment"]
+    "symbol": [
+      "CCJ"
+    ],
+    "company": [
+      "Cameco",
+      "Cameco Corporation"
+    ],
+    "weak": [
+      "uranium miner",
+      "nuclear fuel",
+      "uranium enrichment"
+    ]
   },
   "UEC": {
-    "symbol": ["UEC"],
-    "company": ["Uranium Energy", "Uranium Energy Corp"],
-    "weak": ["uranium producer", "uranium mine"]
+    "symbol": [
+      "UEC"
+    ],
+    "company": [
+      "Uranium Energy",
+      "Uranium Energy Corp"
+    ],
+    "weak": [
+      "uranium producer",
+      "uranium mine"
+    ]
   },
   "LEU": {
-    "symbol": ["LEU"],
-    "company": ["Centrus Energy", "American Centrifuge"],
-    "weak": ["uranium enrichment", "nuclear fuel supply"]
+    "symbol": [
+      "LEU"
+    ],
+    "company": [
+      "Centrus Energy",
+      "American Centrifuge"
+    ],
+    "weak": [
+      "uranium enrichment",
+      "nuclear fuel supply"
+    ]
   },
-  "CEG": {
-    "symbol": ["CEG"],
-    "company": ["Constellation Energy"],
-    "weak": ["nuclear power plant", "nuclear energy", "Constellation nuclear"]
-  },
-
   "NEM": {
-    "symbol": ["NEM"],
-    "company": ["Newmont", "Newmont Corporation", "Newmont Mining"],
-    "weak": ["gold miner", "gold mining company"]
+    "symbol": [
+      "NEM"
+    ],
+    "company": [
+      "Newmont",
+      "Newmont Corporation",
+      "Newmont Mining"
+    ],
+    "weak": [
+      "gold miner",
+      "gold mining company"
+    ]
   },
   "GOLD": {
-    "symbol": ["GOLD"],
-    "company": ["Barrick Gold", "Barrick"],
-    "weak": ["gold producer", "gold mine"]
+    "symbol": [
+      "GOLD"
+    ],
+    "company": [
+      "Barrick Gold",
+      "Barrick"
+    ],
+    "weak": [
+      "gold producer",
+      "gold mine"
+    ]
   },
   "AEM": {
-    "symbol": ["AEM"],
-    "company": ["Agnico Eagle", "Agnico Eagle Mines"],
+    "symbol": [
+      "AEM"
+    ],
+    "company": [
+      "Agnico Eagle",
+      "Agnico Eagle Mines"
+    ],
     "weak": []
   },
   "GLD": {
-    "symbol": ["GLD"],
-    "company": ["SPDR Gold Trust", "SPDR Gold Shares"],
-    "weak": ["gold etf", "gold price surge", "gold rally"]
+    "symbol": [
+      "GLD"
+    ],
+    "company": [
+      "SPDR Gold Trust",
+      "SPDR Gold Shares"
+    ],
+    "weak": [
+      "gold etf",
+      "gold price surge",
+      "gold rally"
+    ]
   },
   "SLV": {
-    "symbol": ["SLV"],
-    "company": ["iShares Silver Trust"],
-    "weak": ["silver etf", "silver price"]
+    "symbol": [
+      "SLV"
+    ],
+    "company": [
+      "iShares Silver Trust"
+    ],
+    "weak": [
+      "silver etf",
+      "silver price"
+    ]
   },
   "USO": {
-    "symbol": ["USO"],
-    "company": ["United States Oil Fund"],
-    "weak": ["oil etf", "crude oil fund", "WTI crude"]
+    "symbol": [
+      "USO"
+    ],
+    "company": [
+      "United States Oil Fund"
+    ],
+    "weak": [
+      "oil etf",
+      "crude oil fund",
+      "WTI crude"
+    ]
   },
-
   "TLT": {
-    "symbol": ["TLT"],
-    "company": ["iShares 20+ Year Treasury Bond ETF"],
-    "weak": ["long bonds", "treasury bonds", "10-year yield", "30-year bond", "bond market selloff"]
+    "symbol": [
+      "TLT"
+    ],
+    "company": [
+      "iShares 20+ Year Treasury Bond ETF"
+    ],
+    "weak": [
+      "long bonds",
+      "treasury bonds",
+      "10-year yield",
+      "30-year bond",
+      "bond market selloff"
+    ]
   },
   "TBT": {
-    "symbol": ["TBT"],
-    "company": ["ProShares UltraShort 20+ Year Treasury"],
-    "weak": ["short bonds", "inverse treasury"]
+    "symbol": [
+      "TBT"
+    ],
+    "company": [
+      "ProShares UltraShort 20+ Year Treasury"
+    ],
+    "weak": [
+      "short bonds",
+      "inverse treasury"
+    ]
   },
-
   "KWEB": {
-    "symbol": ["KWEB"],
-    "company": ["KraneShares CSI China Internet ETF"],
-    "weak": ["china internet etf", "chinese tech stocks", "China tech ban"]
+    "symbol": [
+      "KWEB"
+    ],
+    "company": [
+      "KraneShares CSI China Internet ETF"
+    ],
+    "weak": [
+      "china internet etf",
+      "chinese tech stocks",
+      "China tech ban"
+    ]
   },
   "FXI": {
-    "symbol": ["FXI"],
-    "company": ["iShares China Large-Cap ETF"],
-    "weak": ["china etf", "chinese large cap", "A-shares"]
+    "symbol": [
+      "FXI"
+    ],
+    "company": [
+      "iShares China Large-Cap ETF"
+    ],
+    "weak": [
+      "china etf",
+      "chinese large cap",
+      "A-shares"
+    ]
   },
-
   "KTOS": {
-    "symbol": ["KTOS"],
-    "company": ["Kratos Defense", "Kratos Defense & Security"],
-    "weak": ["drone defense", "unmanned aerial", "hypersonic"]
+    "symbol": [
+      "KTOS"
+    ],
+    "company": [
+      "Kratos Defense",
+      "Kratos Defense & Security"
+    ],
+    "weak": [
+      "drone defense",
+      "unmanned aerial",
+      "hypersonic"
+    ]
   },
   "RCAT": {
-    "symbol": ["RCAT"],
-    "company": ["Red Cat Holdings"],
-    "weak": ["military drone", "defense drone"]
+    "symbol": [
+      "RCAT"
+    ],
+    "company": [
+      "Red Cat Holdings"
+    ],
+    "weak": [
+      "military drone",
+      "defense drone"
+    ]
   },
-
   "SAIC": {
-    "symbol": ["SAIC"],
-    "company": ["Science Applications International", "SAIC Inc"],
-    "weak": ["government IT contract", "federal IT"]
+    "symbol": [
+      "SAIC"
+    ],
+    "company": [
+      "Science Applications International",
+      "SAIC Inc"
+    ],
+    "weak": [
+      "government IT contract",
+      "federal IT"
+    ]
   },
   "CACI": {
-    "symbol": ["CACI"],
-    "company": ["CACI International"],
-    "weak": ["defense IT services", "intelligence contract"]
+    "symbol": [
+      "CACI"
+    ],
+    "company": [
+      "CACI International"
+    ],
+    "weak": [
+      "defense IT services",
+      "intelligence contract"
+    ]
   },
   "BWXT": {
-    "symbol": ["BWXT"],
-    "company": ["BWX Technologies"],
-    "weak": ["nuclear propulsion", "naval nuclear reactor"]
+    "symbol": [
+      "BWXT"
+    ],
+    "company": [
+      "BWX Technologies"
+    ],
+    "weak": [
+      "nuclear propulsion",
+      "naval nuclear reactor"
+    ]
   },
-
-  "DJT": {
-    "symbol": ["DJT"],
-    "company": ["Trump Media", "Trump Media & Technology", "Trump Media and Technology", "TMTG"],
-    "weak": ["Truth Social platform"]
-  },
-
   "DOGE": {
     "symbol": [],
-    "company": ["Dogecoin"],
-    "weak": ["doge cryptocurrency", "doge coin", "Department of Government Efficiency"]
+    "company": [
+      "Dogecoin"
+    ],
+    "weak": [
+      "doge cryptocurrency",
+      "doge coin",
+      "Department of Government Efficiency"
+    ]
   },
-
   "XBI": {
-    "symbol": ["XBI"],
-    "company": ["SPDR S&P Biotech ETF"],
-    "weak": ["biotech etf", "biotech stocks", "FDA approval", "drug pricing"]
+    "symbol": [
+      "XBI"
+    ],
+    "company": [
+      "SPDR S&P Biotech ETF"
+    ],
+    "weak": [
+      "biotech etf",
+      "biotech stocks",
+      "FDA approval",
+      "drug pricing"
+    ]
   },
   "ITA": {
-    "symbol": ["ITA"],
-    "company": ["iShares U.S. Aerospace & Defense ETF"],
-    "weak": ["defense etf", "aerospace stocks", "defense spending"]
+    "symbol": [
+      "ITA"
+    ],
+    "company": [
+      "iShares U.S. Aerospace & Defense ETF"
+    ],
+    "weak": [
+      "defense etf",
+      "aerospace stocks",
+      "defense spending"
+    ]
   },
   "SPY": {
-    "symbol": ["SPY"],
-    "company": ["SPDR S&P 500 ETF"],
-    "weak": ["S&P 500", "stock market crash", "market selloff", "market rally"]
+    "symbol": [
+      "SPY"
+    ],
+    "company": [
+      "SPDR S&P 500 ETF"
+    ],
+    "weak": [
+      "S&P 500",
+      "stock market crash",
+      "market selloff",
+      "market rally"
+    ]
   },
   "QQQ": {
-    "symbol": ["QQQ"],
-    "company": ["Invesco QQQ Trust", "Nasdaq 100 ETF"],
-    "weak": ["Nasdaq", "tech stocks selloff", "tech rally"]
+    "symbol": [
+      "QQQ"
+    ],
+    "company": [
+      "Invesco QQQ Trust",
+      "Nasdaq 100 ETF"
+    ],
+    "weak": [
+      "Nasdaq",
+      "tech stocks selloff",
+      "tech rally"
+    ]
+  },
+  "FNMA": {
+    "symbol": [
+      "FNMA"
+    ],
+    "company": [
+      "Fannie Mae",
+      "Federal National Mortgage"
+    ],
+    "weak": [
+      "fannie"
+    ]
+  },
+  "FMCC": {
+    "symbol": [
+      "FMCC"
+    ],
+    "company": [
+      "Freddie Mac",
+      "Federal Home Loan Mortgage"
+    ],
+    "weak": [
+      "freddie"
+    ]
   }
 }
