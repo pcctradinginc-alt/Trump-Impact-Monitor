@@ -2274,7 +2274,7 @@ def fetch_market_data(ticker: str) -> dict:
         except Exception as e:
             log.warning(f"  ⚠️  Yahoo Finance ({ticker}) attempt {attempt+1}: {e}")
             if attempt < 2:
-                import time; time.sleep(2 ** attempt)
+                time.sleep(2 ** attempt)
     return {}
 
 def format_market_block(ticker: str) -> str:
