@@ -2240,9 +2240,18 @@ YF_TICKER_MAP = {
     "GOOG":  "GOOG",
 }
 
+_YF_LAST_CALL: float = 0.0
+_YF_MIN_INTERVAL = 3.0  # Sekunden zwischen yfinance-Calls (Rate-Limit-Schutz)
+
 @lru_cache(maxsize=512)
 def fetch_market_data(ticker: str) -> dict:
     """Holt 1-Monats-History von Yahoo Finance. Bei Fehler leeres Dict."""
+    global _YF_LAST_CALL
+    wait = _YF_MIN_INTERVAL - (time.time() - _YF_LAST_CALL)
+    if wait > 0:
+        time.sleep(wait)
+    _YF_LAST_CALL = time.time()
+
     yf_sym = YF_TICKER_MAP.get(ticker.upper(), ticker.upper())
     for attempt in range(3):
         try:
@@ -2901,7 +2910,6 @@ def record_outcomes():
         if ticker in seen_tickers:
             continue  # gleichen Ticker nicht zweimal pro Run fetchen
         seen_tickers.add(ticker)
-        time.sleep(2)
         data = fetch_market_data(ticker)
         if not data:
             # Fehlschlag zählen
