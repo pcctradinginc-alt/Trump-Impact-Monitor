@@ -2860,13 +2860,14 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
 """
     if direction == "NO_TRADE" and not SEND_NO_TRADE:
         log.info(f"  ⏭️  {ticker} NO_TRADE → kein Alert (config: send_no_trade=false)")
-        return
+        return True  # analysiert, aber kein Alert
 
     dir_emoji = {"LONG": "📈", "SHORT": "📉"}.get(direction, "❓")
     conf_tag  = {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
     subject   = f"{dir_emoji} Trump-Impact – {ticker}{conf_tag} [{direction}] – {source}"
     send_gmail(subject, html_body)
     log.info(f"  🎯 Alert gesendet: {ticker} | {direction} | {source} | FinBERT: {finbert_sent}")
+    return True
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BACKTESTING  –  Alert-Outcome nach 24h / 7d nachfüllen
@@ -2981,14 +2982,28 @@ def main():
     log.info(f"  Modell: {MODEL}")
     log.info(f"{'═'*62}\n")
 
-    processed  = 0
-    seen_urls: set[str] = set()
+    processed   = 0   # Anzahl analysierter Events
+    emails_sent = 0   # Anzahl tatsächlich versendeter Alert-E-Mails
+    analyzed_log: list[dict] = []  # Für tägliche Summary
 
     def _cap_reached() -> bool:
-        if processed >= MAX_ALERTS_PER_RUN:
+        if emails_sent >= MAX_ALERTS_PER_RUN:
             log.warning(f"  ⚠️  Alert-Cap ({MAX_ALERTS_PER_RUN}) erreicht – verbleibende Artikel übersprungen.")
             return True
         return False
+
+    def _run_analysis(source, ts, text, ticker, url, confidence):
+        nonlocal processed, emails_sent
+        processed += 1
+        analyze_and_alert(source, ts, text, ticker, url, confidence)
+        # E-Mail wurde gesendet wenn 🎯 im Log erschiene — wir prüfen über DB
+        # Einfachster Proxy: letzter DB-Eintrag für diesen Hash
+        h = event_hash(ticker, text)
+        if conn.execute("SELECT 1 FROM events WHERE hash=?", (h,)).fetchone():
+            emails_sent += 1
+            analyzed_log.append({"ticker": ticker, "source": source, "sent": True})
+        else:
+            analyzed_log.append({"ticker": ticker, "source": source, "sent": False})
 
     def _sorted_tickers(tickers: list) -> list:
         """Sortiert hoch vor niedrig/claude, begrenzt auf MAX_TICKERS_PER_ART."""
@@ -3022,8 +3037,7 @@ def main():
                 break
             if already_seen(event_hash(ticker, text)):
                 continue
-            analyze_and_alert("Truth Social", ts, text, ticker, post_url, confidence)
-            processed += 1
+            _run_analysis("Truth Social", ts, text, ticker, post_url, confidence)
 
     # ── News-RSS (Google News + Finanz-Feeds) ────────────────────────────────
     log.info("\n📰 Nachrichten-RSS …")
@@ -3056,15 +3070,11 @@ def main():
                 break
             if already_seen(event_hash(ticker, text)):
                 continue
-            analyze_and_alert(
+            _run_analysis(
                 article.get("_source", "RSS"),
                 article.get("publishedAt", ""),
-                text,
-                ticker,
-                art_url,
-                confidence,
+                text, ticker, art_url, confidence,
             )
-            processed += 1
 
     # ── White House RSS ───────────────────────────────────────────────────────
     log.info("\n🏛️  White House RSS …")
@@ -3087,15 +3097,11 @@ def main():
                 break
             if already_seen(event_hash(ticker, text)):
                 continue
-            analyze_and_alert(
-                "White House",
-                entry.get("published", ""),
-                text,
-                ticker,
-                entry.get("link", "https://www.whitehouse.gov"),
-                confidence,
+            _run_analysis(
+                "White House", entry.get("published", ""),
+                text, ticker,
+                entry.get("link", "https://www.whitehouse.gov"), confidence,
             )
-            processed += 1
 
     # ── Federal Register (Executive Orders, Proklamationen) ──────────────────
     log.info("\n📜 Federal Register …")
@@ -3127,15 +3133,10 @@ def main():
                 break
             if already_seen(event_hash(ticker, text)):
                 continue
-            analyze_and_alert(
-                "Federal Register",
-                doc.get("publishedAt", ""),
-                text,
-                ticker,
-                doc_url,
-                confidence,
+            _run_analysis(
+                "Federal Register", doc.get("publishedAt", ""),
+                text, ticker, doc_url, confidence,
             )
-            processed += 1
 
     if SRC_EDGAR:
         check_edgar_alerts()
@@ -3144,8 +3145,86 @@ def main():
     record_outcomes()
 
     log.info(f"\n{'═'*62}")
-    log.info(f"  ✅ Durchlauf beendet – {processed} Alert(s) verarbeitet")
+    log.info(f"  ✅ Durchlauf beendet – {emails_sent} E-Mail(s) verschickt, {processed} analysiert")
     log.info(f"{'═'*62}\n")
+
+    # Tägliche Summary (nur einmal pro Tag, wenn keine Alerts verschickt wurden)
+    _maybe_send_daily_summary(analyzed_log, emails_sent)
+
+
+def _maybe_send_daily_summary(analyzed_log: list[dict], emails_sent: int) -> None:
+    """
+    Schickt einmal täglich (UTC 20:00-21:00) eine Summary-E-Mail wenn
+    in diesem Run keine Alerts verschickt wurden — damit du weißt dass
+    das System aktiv ist und was analysiert wurde.
+    """
+    now = now_utc()
+    # Nur im Abend-Run (20-21 UTC) und nur wenn keine Alerts heute
+    if not (20 <= now.hour < 21):
+        return
+    today = now.strftime("%Y-%m-%d")
+    # Prüfen ob heute schon eine Summary geschickt wurde
+    sent_today = conn.execute(
+        "SELECT 1 FROM events WHERE source='DAILY_SUMMARY' AND DATE(processed_at)=?",
+        (today,)
+    ).fetchone()
+    if sent_today:
+        return
+    # Nur senden wenn heute keine Alert-E-Mails rausgingen
+    alerts_today = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE source != 'DAILY_SUMMARY' AND DATE(processed_at)=?",
+        (today,)
+    ).fetchone()[0]
+    if alerts_today > 0:
+        return
+
+    # Summary bauen
+    analyzed_tickers = [e["ticker"] for e in analyzed_log if not e["sent"]]
+    ticker_counts: dict = {}
+    for t in analyzed_tickers:
+        ticker_counts[t] = ticker_counts.get(t, 0) + 1
+    top = sorted(ticker_counts.items(), key=lambda x: -x[1])[:10]
+
+    rows_html = "".join(
+        f'<tr><td style="padding:4px 12px 4px 0;font-size:12px;font-weight:600;">{t}</td>'
+        f'<td style="padding:4px 0;font-size:12px;color:#6e6e73;">{n}× analysiert — kein Signal</td></tr>'
+        for t, n in top
+    ) or '<tr><td colspan="2" style="padding:8px 0;font-size:12px;color:#9ca3af;">Keine Analysen heute</td></tr>'
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
+<body style="background:#f5f5f7;margin:0;padding:32px 0;">
+<table width="600" cellpadding="0" cellspacing="0" style="margin:0 auto;max-width:600px;">
+  <tr><td style="background:#1d1d1f;border-radius:16px 16px 0 0;padding:24px 32px;">
+    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#6e6e73;text-transform:uppercase;letter-spacing:.08em;">
+      Trump Impact Monitor · Tages-Summary
+    </p>
+    <h1 style="margin:0;font-size:20px;font-weight:700;color:#f5f5f7;">
+      Heute keine Kauf-/Verkaufs-Signale
+    </h1>
+    <p style="margin:6px 0 0;font-size:12px;color:#6e6e73;">{today} · {len(analyzed_log)} Events analysiert · 0 Alerts</p>
+  </td></tr>
+  <tr><td style="background:#fff;padding:20px 32px 24px;">
+    <p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#6e6e73;text-transform:uppercase;letter-spacing:.06em;">
+      Analysierte Ticker (kein actionable Signal)
+    </p>
+    <table style="border-collapse:collapse;width:100%;">{rows_html}</table>
+    <p style="margin:16px 0 0;font-size:11px;color:#9ca3af;">
+      Das System läuft normal. Du erhältst eine E-Mail sobald ein konkretes Signal erkannt wird.
+    </p>
+  </td></tr>
+  <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:12px 32px;border-top:1px solid #e5e5ea;">
+    <p style="margin:0;font-size:11px;color:#9ca3af;">{now.strftime('%Y-%m-%d %H:%M UTC')}</p>
+  </td></tr>
+</table></body></html>"""
+
+    send_gmail(f"📊 Trump Monitor – Kein Signal heute ({today})", html)
+    # Als Sentinel in DB speichern
+    conn.execute(
+        "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?)",
+        (f"daily-summary-{today}", "DAILY_SUMMARY", today, "", f"daily-summary-{today}", "", now.isoformat()),
+    )
+    conn.commit()
+    log.info("  📊 Tages-Summary verschickt")
 
 
 if __name__ == "__main__":
