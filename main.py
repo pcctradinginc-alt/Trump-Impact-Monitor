@@ -672,7 +672,22 @@ _VALUE_SORT_KEY = {
     "$500,001 - $1,000,000": 4, "$250,001 - $500,000": 5,
     "$100,001 - $250,000": 6, "$50,001 - $100,000": 7,
     "$15,001 - $50,000": 8, "$1,001 - $15,000": 9,
-    "$1,001 - $15,000": 9, "None (or less than $1,001)": 10,
+    "None (or less than $1,001)": 10,
+}
+
+# Farbige Hinterlegung je Wertbereich (bg, text, label)
+_VALUE_COLORS = {
+    "Over $50,000,000":         ("#1d1d1f", "#ffffff", ">$50M"),
+    "$25,000,001 - $50,000,000":("#2d3748", "#ffffff", "$25M–$50M"),
+    "$5,000,001 - $25,000,000": ("#1e3a5f", "#ffffff", "$5M–$25M"),
+    "$1,000,001 - $5,000,000":  ("#1a4971", "#e0f0ff", "$1M–$5M"),
+    "$500,001 - $1,000,000":    ("#0f5499", "#e8f4fd", "$500K–$1M"),
+    "$250,001 - $500,000":      ("#1565c0", "#e3f2fd", "$250K–$500K"),
+    "$100,001 - $250,000":      ("#1976d2", "#e3f2fd", "$100K–$250K"),
+    "$50,001 - $100,000":       ("#0288d1", "#e1f5fe", "$50K–$100K"),
+    "$15,001 - $50,000":        ("#0097a7", "#e0f7fa", "$15K–$50K"),
+    "$1,001 - $15,000":         ("#00796b", "#e0f2f1", "$1K–$15K"),
+    "None (or less than $1,001)":("#9ca3af","#f5f5f7", "<$1K"),
 }
 
 def holdings_html_block() -> str:
@@ -794,15 +809,43 @@ def holdings_html_block() -> str:
 
         changed_rows.append((ticker, asset_name, label, bg, fg, snap_val, last_date))
 
+    # Sortiere nach Positionsgröße (278e-Wert), dann nach Datum
+    changed_rows.sort(key=lambda r: (_VALUE_SORT_KEY.get(r[5], 9), r[6] or ""))
+
+    # Gruppiere nach Wertbereich für farbige Trennzeilen
+    current_group = None
     changed_html = ""
     for ticker, asset_name, label, bg, fg, snap_val, last_date in changed_rows:
         badge = (f'<span style="background:{bg};color:{fg};font-size:9px;font-weight:700;'
                  f'padding:2px 5px;border-radius:3px;">{label}</span>')
+
+        # Wertbereich-Farbe
+        val_bg, val_fg, val_label = _VALUE_COLORS.get(
+            snap_val, ("#f5f5f7", "#6e6e73", snap_val or "–"))
+
+        # Gruppen-Trennzeile wenn neuer Wertbereich
+        if snap_val != current_group and snap_val in _VALUE_COLORS:
+            current_group = snap_val
+            changed_html += (
+                f'<tr>'
+                f'<td colspan="5" style="padding:4px 8px;font-size:9px;font-weight:700;'
+                f'letter-spacing:0.06em;text-transform:uppercase;'
+                f'background:{val_bg};color:{val_fg};border-radius:4px;">'
+                f'{val_label}</td></tr>'
+            )
+
+        val_chip = (
+            f'<span style="background:{val_bg};color:{val_fg};font-size:9px;'
+            f'font-weight:700;padding:1px 5px;border-radius:3px;">{val_label}</span>'
+            if snap_val in _VALUE_COLORS else
+            f'<span style="font-size:10px;color:#9ca3af;">{snap_val or "–"}</span>'
+        )
+
         changed_html += (
-            f'<tr style="background:{"#fafffe" if label in ("NEW BUY","ADD") else "#fff8f8" if label in ("SOLD OUT","REDUCED") else "#fff"};">'
+            f'<tr>'
             f'<td {td} style="font-weight:600;color:#1d1d1f;">{ticker}</td>'
             f'<td {td} style="color:#6e6e73;">{(asset_name or "")[:40]}</td>'
-            f'<td {td} style="color:#9ca3af;font-size:10px;">{snap_val}</td>'
+            f'<td {td}>{val_chip}</td>'
             f'<td {td} style="color:#9ca3af;font-size:10px;white-space:nowrap;">{last_date or "–"}</td>'
             f'<td {td}>{badge}</td>'
             f'</tr>'
