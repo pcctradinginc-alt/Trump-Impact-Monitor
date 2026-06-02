@@ -447,52 +447,53 @@ ENTITIES_FILE = os.path.join(os.path.dirname(__file__), "entities.json")
 with open(ENTITIES_FILE, encoding="utf-8") as f:
     ENTITIES: dict = json.load(f)
 
+# Schneller kombinierter Tier-1-Regex: alle ~7000 Symbole in einem Pattern
+# Regex-Engine baut daraus einen effizienten Automaten → O(text_length) statt O(n_tickers)
+# Mindestlänge 2 Zeichen um False Positives wie "J", "A" zu vermeiden
+_ALL_SYMBOLS = sorted((s for s in ENTITIES if len(s) >= 2), key=len, reverse=True)
+_TIER1_REGEX = re.compile(
+    r'\b(' + '|'.join(re.escape(s) for s in _ALL_SYMBOLS) + r')\b'
+)
+
 def find_all_tickers(text: str) -> list[tuple[str, str]]:
     """
-    Tier 1 – symbol  : case-sensitiv,   immer          → "hoch"
-    Tier 2 – company : case-insensitiv, auch Plural     → "hoch"
-    Tier 3 – weak    : case-insensitiv, Finanzkontext,
-                       Alias-Mindestlänge ≥5            → "niedrig"
-    Tier 4 – Plural-Normalisierung: "Apples" → "Apple"
+    Tier 1 – symbol  : kombinierter Regex über alle ~7000 Symbole → "hoch"
+    Tier 2 – company : case-insensitiv, Firmenname/CEO (nur bekannte 512) → "hoch"
+    Tier 3 – weak    : case-insensitiv, Finanzkontext, Mindestlänge ≥5 → "niedrig"
     """
     results:     list[tuple[str, str]] = []
     seen:        set[str]              = set()
     has_finance: bool                  = is_financially_relevant(text)
 
-    # Tier 4: Plural/Possessiv normalisieren vor Tier-2-Matching
-    normalized = re.sub(r"'s\b", "", text)                    # Apple's → Apple
-    normalized = re.sub(r"(\b[A-Za-z]{3,})(s)\b",            # Apples → Apple
-                        lambda m: m.group(1), normalized)
+    # Tier 1 — kombinierter Regex: O(text_length), deckt alle ~7000 Symbole ab
+    for m in _TIER1_REGEX.finditer(text):
+        t = m.group(1).upper()
+        if t not in seen:
+            results.append((t, "hoch"))
+            seen.add(t)
 
+    # Tier 4: Plural/Possessiv normalisieren vor Tier-2-Matching
+    normalized = re.sub(r"'s\b", "", text)
+    normalized = re.sub(r"(\b[A-Za-z]{3,})(s)\b", lambda m: m.group(1), normalized)
+
+    # Tier 2 — Firmenname/CEO (nur Ticker mit nicht-leeren company-Aliases)
     for ticker, tiers in ENTITIES.items():
         t = ticker.upper()
-        if t in seen:
+        if t in seen or not tiers.get("company"):
             continue
-        matched = False
-
-        # Tier 1 — Ticker-Symbol, case-sensitiv
-        for alias in tiers.get("symbol", []):
-            if alias and re.search(r'\b' + re.escape(alias) + r'\b', text):
-                results.append((t, "hoch"))
-                seen.add(t)
-                matched = True
-                break
-        if matched:
-            continue
-
-        # Tier 2 — Firmenname/CEO, auch auf normalisiertem Text
-        for alias in tiers.get("company", []):
+        for alias in tiers["company"]:
             if re.search(r'\b' + re.escape(alias) + r'\b', normalized, re.IGNORECASE):
                 results.append((t, "hoch"))
                 seen.add(t)
-                matched = True
                 break
-        if matched:
-            continue
 
-        # Tier 3 — schwache Aliases, nur mit Finanzkontext, Mindestlänge ≥5
-        if has_finance:
-            for alias in tiers.get("weak", []):
+    # Tier 3 — schwache Aliases, nur mit Finanzkontext
+    if has_finance:
+        for ticker, tiers in ENTITIES.items():
+            t = ticker.upper()
+            if t in seen or not tiers.get("weak"):
+                continue
+            for alias in tiers["weak"]:
                 if len(alias) >= 5 and re.search(
                     r'\b' + re.escape(alias) + r'\b', text, re.IGNORECASE
                 ):
