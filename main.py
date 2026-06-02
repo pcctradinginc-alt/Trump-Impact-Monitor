@@ -2987,6 +2987,7 @@ def main():
     processed   = 0   # Anzahl analysierter Events
     emails_sent = 0   # Anzahl tatsächlich versendeter Alert-E-Mails
     analyzed_log: list[dict] = []  # Für tägliche Summary
+    seen_urls: set[str] = set()
 
     def _cap_reached() -> bool:
         if emails_sent >= MAX_ALERTS_PER_RUN:
