@@ -10,7 +10,6 @@ import html
 import feedparser
 import requests
 import yfinance as yf
-from functools import lru_cache
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from anthropic import Anthropic
@@ -2268,16 +2267,21 @@ YF_TICKER_MAP = {
 _YF_LAST_CALL: float = 0.0
 _YF_MIN_INTERVAL = 3.0  # Sekunden zwischen yfinance-Calls (Rate-Limit-Schutz)
 
-@lru_cache(maxsize=512)
+_YF_CACHE: dict[str, dict] = {}  # nur Erfolge werden gecacht
+
 def fetch_market_data(ticker: str) -> dict:
     """Holt 1-Monats-History von Yahoo Finance. Bei Fehler leeres Dict."""
     global _YF_LAST_CALL
+    t_upper = ticker.upper()
+    if t_upper in _YF_CACHE:
+        return _YF_CACHE[t_upper]
+
     wait = _YF_MIN_INTERVAL - (time.time() - _YF_LAST_CALL)
     if wait > 0:
         time.sleep(wait)
     _YF_LAST_CALL = time.time()
 
-    yf_sym = YF_TICKER_MAP.get(ticker.upper(), ticker.upper())
+    yf_sym = YF_TICKER_MAP.get(t_upper, t_upper)
     for attempt in range(3):
         try:
             hist = yf.Ticker(yf_sym).history(period="1mo", auto_adjust=True,
@@ -2289,12 +2293,14 @@ def fetch_market_data(ticker: str) -> dict:
             prev_close = round(float(close.iloc[-2]), 2)
             week_ago   = round(float(close.iloc[-6]) if len(close) >= 6 else float(close.iloc[0]), 2)
             month_ago  = round(float(close.iloc[0]), 2)
-            return {
+            result = {
                 "price":   current,
                 "chg_1d":  round((current / prev_close - 1) * 100, 2),
                 "chg_1w":  round((current / week_ago   - 1) * 100, 2),
                 "chg_1m":  round((current / month_ago  - 1) * 100, 2),
             }
+            _YF_CACHE[t_upper] = result  # nur Erfolge cachen
+            return result
         except Exception as e:
             log.warning(f"  ⚠️  Yahoo Finance ({ticker}) attempt {attempt+1}: {e}")
             if attempt < 2:
@@ -2457,16 +2463,20 @@ def parse_trade_direction(alert_text: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 def discover_tickers_via_claude(text: str) -> list[tuple[str, str]]:
     """
-    Fragt Claude welche börsennotierten Unternehmen durch den Post betroffen sind.
-    Gibt max. 3 (ticker, 'claude') Tupel zurück, oder [] bei keinem Treffer.
+    Fragt Claude welche börsennotierten Unternehmen durch den Text am meisten profitieren.
+    Gibt max. 3 (ticker, 'claude') Tupel zurück, sortiert nach erwartetem Impact, oder [].
     """
     prompt = (
-        "Trump hat folgenden Text auf Truth Social gepostet:\n\n"
-        f"{text}\n\n"
-        "Welche börsennotierten US-Unternehmen sind dadurch am wahrscheinlichsten "
-        "DIREKT und KONKRET betroffen (Kursreaktion realistisch)? "
-        "Antworte NUR mit kommaseparierten Ticker-Symbolen, max. 3 (z.B. NVDA,TSM,INTC). "
-        "Falls kein konkreter Unternehmensbezug erkennbar: antworte nur mit NONE"
+        "Analyze this Trump-related news text and identify the US-listed companies "
+        "that are the BIGGEST BENEFICIARIES or most SEVERELY HURT by this specific event.\n\n"
+        f"TEXT: {text[:1200]}\n\n"
+        "Rules:\n"
+        "- Rank by expected price impact magnitude, biggest first\n"
+        "- For sector-wide announcements (subsidies, tariffs, bans), pick the largest "
+        "pure-play company in that sector, not diversified conglomerates\n"
+        "- Only include companies with realistic near-term price reaction\n"
+        "- Reply ONLY with comma-separated ticker symbols, max 3 (e.g. BTU,ARCH,CEIX)\n"
+        "- If no concrete market impact is identifiable: reply only with NONE"
     )
     try:
         resp = client.messages.create(
