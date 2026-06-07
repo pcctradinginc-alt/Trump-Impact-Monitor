@@ -122,13 +122,16 @@
     ],
     "weak": [
       "Model Y",
-      "Model 3",
-      "Cybertruck",
-      "Twitter",
-      "X platform",
+      "Powerwall",
       "xAI",
       "Grok",
-      "Powerwall"
+      "Model 3",
+      "Twitter",
+      "space exploration",
+      "starship",
+      "X platform",
+      "spacex",
+      "Cybertruck"
     ]
   },
   "AVGO": {
@@ -4894,11 +4897,21 @@
       "RKLB"
     ],
     "company": [
-      "Rocket Lab",
+      "Peter Beck",
+      "Elon Musk",
+      "Musk",
+      "Space Exploration Technologies",
+      "SpaceX",
       "Rocket Lab USA",
-      "Peter Beck"
+      "Rocket Lab"
     ],
-    "weak": []
+    "weak": [
+      "rocket launch",
+      "falcon",
+      "starship",
+      "space launch",
+      "orbital"
+    ]
   },
   "LUNR": {
     "symbol": [
@@ -4926,7 +4939,11 @@
     "company": [
       "AST SpaceMobile"
     ],
-    "weak": []
+    "weak": [
+      "space internet",
+      "satellite internet",
+      "starlink"
+    ]
   },
   "MGM": {
     "symbol": [
