@@ -2452,6 +2452,137 @@ def _onvista_underlying_url(ticker: str) -> str | None:
     return url
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# VONTOBEL PRODUKT-API  –  konkretes, in DE handelbares Turbo-Zertifikat (WKN)
+# Öffentliche JSON-API des Emittenten-Finders, kostenlos, kein Key.
+# Verifiziert: culture via Query-Param "c=de-de"; Range-Filter via
+# "selectedItem", Listen-Filter via "selectedItems"; der Richtungsfilter
+# (property 4) wird von der API ignoriert → Richtung client-seitig filtern.
+# productType 5 = Open End Turbo · property 1 = Basiswert · 14 = Hebel · 58 = Preis €
+# ─────────────────────────────────────────────────────────────────────────────
+VONTOBEL_API  = "https://markets.vontobel.com/api/v1"
+VONTOBEL_PURL = ("https://markets.vontobel.com/de-de/produkte/hebel/"
+                 "turbo-optionsscheine-open-end/")
+_VT_HEADERS   = {"User-Agent": FEED_AGENT, "Accept": "application/json"}
+_VT_KEY_CACHE: dict = {}
+
+
+def _vontobel_underlying_key(ticker: str):
+    """Löst Ticker → Vontobel-Underlying-Key (Firmenname zuerst, dann Ticker)."""
+    t = ticker.upper()
+    if t in _VT_KEY_CACHE:
+        return _VT_KEY_CACHE[t]
+    company = (ENTITIES.get(t, {}).get("company") or [t])[0]
+    key = None
+    for query in (company, t):
+        try:
+            r = requests.get(
+                f"{VONTOBEL_API}/underlyings/search",
+                params={"Query": query, "Page": 0, "PageSize": 5,
+                        "ProductType": 5, "c": "de-de"},
+                headers=_VT_HEADERS, timeout=12,
+            )
+            r.raise_for_status()
+            for it in r.json().get("payload", {}).get("items", []):
+                # Treffer validieren: erstes Wort des Suchbegriffs muss im Namen stecken
+                if query.lower().split()[0] in it.get("text", "").lower():
+                    key = it.get("key")
+                    break
+            if key:
+                break
+        except Exception as e:
+            log.warning(f"  ⚠️  Vontobel Underlying-Suche ({query}): {e}")
+    _VT_KEY_CACHE[t] = key
+    return key
+
+
+def find_best_turbo(ticker: str, direction: str,
+                    hebel_lo: float, hebel_hi: float, hebel_target: float):
+    """
+    Sucht das beste in Deutschland handelbare Open-End-Turbo-Zertifikat:
+    - Server-Filter: Basiswert, Hebel im Suchband, Preis 4–25 €
+    - Client-Filter: Richtung + KO-Plausibilität (Long: KO < Spot, Short: KO > Spot)
+    - 'Bestes' = Hebel am nächsten am Zielhebel des Risikoprofils
+    - Spread per Detail-Abfrage (Bid/Ask) ergänzt
+    Gibt None zurück wenn nichts gefunden → Aufrufer nutzt Parameter-Fallback.
+    Hinweis: durchsucht nur Vontobel (einzige stabil zugängliche Gratis-API);
+    SG/HSBC/BNP-Alternativen bleiben dem manuellen Finder vorbehalten.
+    """
+    key = _vontobel_underlying_key(ticker)
+    if not key:
+        log.info(f"  ℹ️  Vontobel: kein Underlying für {ticker} → kein konkretes Zertifikat")
+        return None
+
+    want_dir = 1 if direction == "LONG" else 2
+    try:
+        body = {"productType": 5, "page": 0, "pageSize": 50, "filters": [
+            {"property": 1,  "selectedItems": [{"key": key}]},
+            {"property": 14, "selectedItem": {"min": hebel_lo, "max": hebel_hi}},
+            {"property": 58, "selectedItem": {"min": 4, "max": 25}},
+        ]}
+        r = requests.post(f"{VONTOBEL_API}/products/search", json=body,
+                          params={"c": "de-de"}, headers=_VT_HEADERS, timeout=15)
+        r.raise_for_status()
+        candidates = []
+        for it in r.json().get("payload", {}).get("items", []):
+            if it.get("direction") != want_dir or not it.get("leverage"):
+                continue
+            ko, spot = it.get("knockOut"), it.get("spotPrice")
+            if not ko or not spot:
+                continue
+            # KO muss zur Richtung passen (Schutz falls direction-Feld fehlerhaft)
+            if (want_dir == 1 and ko >= spot) or (want_dir == 2 and ko <= spot):
+                continue
+            candidates.append(it)
+        if not candidates:
+            log.info(f"  ℹ️  Vontobel: kein {direction}-Turbo im Hebel-Band für {ticker}")
+            return None
+
+        # Spread-bewusste Auswahl: Top 3 nach Hebel-Nähe, Spread per Detail-
+        # Abfrage prüfen. Erstes Papier mit Spread ≤ 0.8% gewinnt (Reihenfolge
+        # = Hebel-Nähe); erfüllt keines das Kriterium → kleinster Spread.
+        candidates.sort(key=lambda it: abs(it["leverage"] - hebel_target))
+        scored = []
+        for it in candidates[:3]:
+            isin = next((f["isin"] for f in it.get("primaryFeatures", [])
+                         if f.get("isin")), "")
+            if not isin:
+                continue
+            entry = {
+                "isin":       isin,
+                "wkn":        isin[5:11],
+                "leverage":   it["leverage"],
+                "ko":         it["knockOut"],
+                "buffer_pct": round(it.get("riskBuffer", 0) * 100, 1),
+                "bid":        it.get("price", {}).get("bid"),
+                "ask":        None,
+                "spread_pct": None,
+                "url":        VONTOBEL_PURL + isin,
+            }
+            try:
+                rd = requests.get(f"{VONTOBEL_API}/products/{isin}",
+                                  params={"c": "de-de"}, headers=_VT_HEADERS, timeout=12)
+                rd.raise_for_status()
+                price = rd.json().get("payload", {}).get("price", {})
+                bid, ask = price.get("bid"), price.get("ask")
+                if bid and ask and ask > 0:
+                    entry["bid"], entry["ask"] = bid, ask
+                    entry["spread_pct"] = round((ask - bid) / ask * 100, 2)
+            except Exception:
+                pass  # Spread optional — Kandidat bleibt gültig
+            scored.append(entry)
+            if entry["spread_pct"] is not None and entry["spread_pct"] <= 0.8:
+                return entry  # Hebel-nächstes Papier mit gutem Spread → fertig
+
+        if not scored:
+            return None
+        # Kein Kandidat unter 0.8% → den mit dem kleinsten bekannten Spread
+        return min(scored, key=lambda e: e["spread_pct"] if e["spread_pct"] is not None else 99.0)
+    except Exception as e:
+        log.warning(f"  ⚠️  Vontobel Produktsuche ({ticker}): {e}")
+        return None
+
+
 def _calc_hv30(ticker: str) -> float | None:
     """
     30-Tage historische Volatilität (annualisiert) als IV-Proxy — kostenlose
@@ -2485,9 +2616,9 @@ def turbo_recommendation(ticker: str, direction: str) -> str:
       Turbo nicht unabhängig voneinander wählen lassen
     - Auswahlkriterien fürs konkrete Papier: Emittent, Spread, Preisbereich
 
-    Die finale WKN-Auswahl trifft der Nutzer im Finder — eine kostenlose
-    Echtzeit-API für Zertifikate-Suche existiert nicht (onvista-Finder-API
-    ist intern/undokumentiert, finanzen.net blockt Bots).
+    Konkretes Zertifikat: find_best_turbo() sucht über die Vontobel-API das
+    am besten passende, in DE handelbare Papier (WKN/ISIN, Spread-Check).
+    Schlägt das fehl, bleibt der Parameter-Block mit Finder-Links als Fallback.
     """
     if direction == "UNKLAR":
         return "⛔ Keine Empfehlung – Trade-Richtung unklar"
@@ -2518,6 +2649,55 @@ def turbo_recommendation(ticker: str, direction: str) -> str:
     hv_info  = f"{hv*100:.1f}% (30T HV als IV-Proxy)" if hv else "k.A."
     company  = (ENTITIES.get(ticker.upper(), {}).get("company") or [ticker])[0]
 
+    # ── Konkretes Zertifikat über Vontobel-API suchen ────────────────────────
+    best = find_best_turbo(ticker, direction, hebel_lo, hebel_hi, hebel)
+    if not best:
+        # Zweiter Versuch: Suchband nur nach UNTEN erweitern (weniger Hebel =
+        # mehr KO-Puffer = sicherer). Nach oben nie — das hieße mehr KO-Risiko
+        # als das Risikoprofil erlaubt.
+        best = find_best_turbo(ticker, direction,
+                               max(1.5, round(hebel * 0.5, 1)), hebel_hi, hebel)
+
+    header = (
+        f"{emoji} {typ} Open End Turbo auf {ticker}\n"
+        f"\n"
+        f"   Kurs aktuell:      {price:.2f} USD\n"
+        f"   Volatilität:       {hv_info}\n"
+        f"   Ziel-Profil:       KO {ko_op} {ko:.2f} USD ({abstand}% Abstand) · Hebel ~{hebel}x\n"
+        f"   Hinweis: Hebel ≈ 1/KO-Abstand — mehr Puffer = weniger Hebel\n"
+    )
+
+    if best:
+        if best["spread_pct"] is None:
+            spread_txt = "k.A."
+        else:
+            spread_txt = f"{best['spread_pct']:.2f}%"
+            if best["spread_pct"] > 0.8:
+                spread_txt += "  ⚠️ über 0.8%-Kriterium"
+        preis_txt = (f"Bid {best['bid']:.2f} € / Ask {best['ask']:.2f} €"
+                     if best.get("ask") else
+                     f"Bid {best['bid']:.2f} €" if best.get("bid") else "k.A.")
+        return (
+            header
+            + f"   ──────────────────────────────────\n"
+            + f"   ✅ BESTES ZERTIFIKAT (in DE handelbar, Vontobel):\n"
+            + f"   WKN:               {best['wkn']}\n"
+            + f"   ISIN:              {best['isin']}\n"
+            + f"   Hebel:             {best['leverage']:.2f}x\n"
+            + f"   Knock-Out:         {best['ko']:.2f} USD  ({best['buffer_pct']}% Abstand)\n"
+            + f"   Preis:             {preis_txt}\n"
+            + f"   Spread:            {spread_txt}\n"
+            + f"   Typ:               Open End Turbo (keine Laufzeit)\n"
+            + f"\n"
+            + f"   📄 Produktseite:\n"
+            + f"   {best['url']}\n"
+            + f"\n"
+            + f"   Auswahl: Hebel am nächsten am Ziel ({hebel}x), Preis 4–25 €,\n"
+            + f"   KO-Richtung geprüft. Alternativen anderer Emittenten (SG/HSBC/BNP):\n"
+            + f"   {ONVISTA_KO_FINDER}"
+        )
+
+    # ── Fallback: kein API-Treffer → Parameter + manuelle Finder-Links ───────
     links = []
     page_url = _onvista_underlying_url(ticker)
     if page_url:
@@ -2526,23 +2706,18 @@ def turbo_recommendation(ticker: str, direction: str) -> str:
     links_block = "\n".join(links)
 
     return (
-        f"{emoji} {typ} Open End Turbo auf {ticker}\n"
-        f"\n"
-        f"   Kurs aktuell:      {price:.2f} USD\n"
-        f"   Volatilität:       {hv_info}\n"
-        f"   ──────────────────────────────────\n"
-        f"   Knock-Out:         {ko_op} {ko:.2f} USD  ({abstand}% Abstand)\n"
-        f"   Hebel impliziert:  ~{hebel}x  (Suchband {hebel_lo}–{hebel_hi}x)\n"
-        f"   Hinweis: Hebel ≈ 1/KO-Abstand — mehr Puffer = weniger Hebel\n"
-        f"   ──────────────────────────────────\n"
-        f"   Finder-Filter:     Basiswert „{company}“ · {typ} · KO {ko_op} {ko:.2f}\n"
-        f"   Emittenten:        Vontobel · SG · HSBC · BNP\n"
-        f"   Max. Spread:       < 0.8 %\n"
-        f"   Preis-Ziel:        4–25 €\n"
-        f"   Typ:               Open End (keine Laufzeit)\n"
-        f"\n"
-        f"   🔍 Zertifikat auswählen:\n"
-        f"{links_block}"
+        header
+        + f"   ──────────────────────────────────\n"
+        + f"   Kein automatischer Zertifikat-Treffer — manuell auswählen:\n"
+        + f"   Finder-Filter:     Basiswert „{company}“ · {typ} · KO {ko_op} {ko:.2f}\n"
+        + f"   Hebel-Suchband:    {hebel_lo}–{hebel_hi}x\n"
+        + f"   Emittenten:        Vontobel · SG · HSBC · BNP\n"
+        + f"   Max. Spread:       < 0.8 %\n"
+        + f"   Preis-Ziel:        4–25 €\n"
+        + f"   Typ:               Open End (keine Laufzeit)\n"
+        + f"\n"
+        + f"   🔍 Zertifikat auswählen:\n"
+        + f"{links_block}"
     )
 
 

@@ -107,6 +107,12 @@ Jede Stunde (nur kostenlose Quellen):
   + Trump-Interessenkonflikt inkl. Performance seit Trump-Kauf
          │
          ▼
+  Turbo-Zertifikat: konkretes, in DE handelbares Papier (WKN/ISIN)
+  via Vontobel-Produkt-API — Hebel ≈ 1/KO-Abstand nach Risikoprofil,
+  Spread-Check ≤ 0.8 %, Preis 4–25 €, KO-Plausibilität geprüft;
+  Fallback: Finder-Links mit manuellen Filterwerten
+         │
+         ▼
   Gmail-Alert (HTML) · SQLite-Dedup · 4h-Ticker-Cooldown · Tages-Cap
 ```
 
