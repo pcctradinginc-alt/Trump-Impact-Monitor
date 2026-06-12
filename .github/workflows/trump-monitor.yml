@@ -10,6 +10,9 @@ on:
 permissions:
   contents: write          # needed for git push (DB update)
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # Nie zwei Läufe parallel — verhindert Push-Konflikte auf alerts.db
 # und damit verlorene Dedup-Daten (= doppelte E-Mails).
 concurrency:
