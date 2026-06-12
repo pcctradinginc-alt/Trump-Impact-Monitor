@@ -66,7 +66,6 @@ MODEL                = "claude-sonnet-4-6"
 # ─────────────────────────────────────────────────────────────────────────────
 REQUIRED = {
     "ANTHROPIC_API_KEY":       ANTHROPIC_API_KEY,
-    "SCRAPE_CREATORS_API_KEY": SCRAPE_KEY,
     "GMAIL_EMAIL":             GMAIL_EMAIL,
     "GMAIL_APP_PASSWORD":      GMAIL_PASS,
     "RECIPIENT_EMAIL":         RECIPIENT,
@@ -75,6 +74,11 @@ missing = [k for k, v in REQUIRED.items() if not v]
 if missing:
     log.error(f"❌ Fehlende Secrets: {', '.join(missing)}")
     sys.exit(1)
+
+# Optional: ScrapeCreators ist kostenpflichtig und nur letzter Fallback.
+# Ohne Key laufen alle kostenlosen Quellen (trumpstruth.org, CNN-Archiv) normal.
+if not SCRAPE_KEY:
+    log.info("ℹ️  SCRAPE_CREATORS_API_KEY nicht gesetzt – nur kostenlose Truth-Social-Quellen aktiv")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SQLITE  –  Dedup-Datenbank
@@ -242,37 +246,6 @@ def _rate_limit_record(ticker: str) -> None:
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FINBERT  –  lokales Finanz-Sentiment (lazy-loaded)
-# ─────────────────────────────────────────────────────────────────────────────
-_finbert_pipeline = None
-
-def get_finbert_sentiment(text: str) -> str:
-    """
-    Lädt ProsusAI/finbert beim ersten Aufruf und gibt
-    'positiv (92.3%)'  /  'negativ (87.1%)'  /  'neutral (76.0%)'  zurück.
-    Bei Fehler: 'nicht verfügbar'.
-    """
-    global _finbert_pipeline
-    try:
-        if _finbert_pipeline is None:
-            from transformers import pipeline as hf_pipeline
-            log.info("  🧠 FinBERT wird geladen …")
-            _finbert_pipeline = hf_pipeline(
-                "text-classification",
-                model="ProsusAI/finbert",
-                truncation=True,
-                max_length=512,
-            )
-        result = _finbert_pipeline(text[:512])[0]
-        label_map = {"positive": "positiv", "negative": "negativ", "neutral": "neutral"}
-        label = label_map.get(result["label"].lower(), result["label"].lower())
-        score = round(result["score"] * 100, 1)
-        return f"{label} ({score}%)"
-    except Exception as e:
-        log.warning(f"  ⚠️  FinBERT Fehler: {e}")
-        return "nicht verfügbar"
-
-# ─────────────────────────────────────────────────────────────────────────────
 # TRUMP-NAMES  –  Pflichtfilter für allgemeine Finanz-RSS-Feeds
 # ─────────────────────────────────────────────────────────────────────────────
 TRUMP_NAMES = {
@@ -364,8 +337,9 @@ def is_financially_relevant(text: str, truth_social: bool = False) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 def clean_text(text: str) -> str:
     text = html.unescape(text)
-    text = re.sub(r'https?://\S+', '', text)   # URLs weg
-    text = re.sub(r'<[^>]+>', ' ', text)        # HTML-Tags weg
+    text = re.sub(r'<[^>]+>', ' ', text)            # HTML-Tags zuerst (sonst zerreißt
+    text = re.sub(r'https?://\S+', '', text)        # die URL-Entfernung Attribute)
+    text = re.sub(r'\b[\w.-]+\.(com|org|net|gov)/\S*', '', text)  # schemalose URL-Reste
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
@@ -454,6 +428,28 @@ _TIER1_REGEX = re.compile(
     r'\b(' + '|'.join(re.escape(s) for s in _ALL_SYMBOLS) + r')\b'
 )
 
+# Tickersymbole die zugleich häufige englische Wörter sind. Diese matchen nur
+# mit $-Präfix ($ALL, $NOW) oder über Tier 2 (Firmenname) — sonst erzeugt jeder
+# Trump-Post in GROSSBUCHSTABEN Dutzende Phantom-Ticker (ON, ALL, WIN, BIG …).
+_AMBIGUOUS_SYMBOLS = {
+    "ALL", "AN", "ANY", "ARE", "AT", "BE", "BIG", "BY", "CAN", "CAT", "DO",
+    "EAT", "EVER", "FAST", "FLY", "FOR", "FUN", "GO", "GOOD", "HAS", "HE",
+    "HER", "HIM", "HOPE", "HUGE", "IS", "IT", "LOVE", "LOW", "MAIN", "MAN",
+    "ME", "MORE", "NEXT", "NICE", "NO", "NOW", "ON", "ONE", "OPEN", "OR",
+    "OUT", "PAY", "PLAY", "REAL", "RUN", "SAFE", "SEE", "SHIP", "SO", "SUN",
+    "TALK", "TECH", "TRUE", "TWO", "UP", "US", "USA", "VERY", "WAY", "WELL",
+    "WIN", "YOU", "ALSO", "BEST", "EVEN", "FREE", "GAIN", "GREAT", "JOB",
+    "LIFE", "LIKE", "MUST", "NEW", "OLD", "OUR", "OWN", "SAME", "SAY",
+    "SELF", "SHE", "THE", "TOO", "WANT", "WAR", "WILL", "WOW",
+}
+
+def _is_mostly_uppercase(text: str) -> bool:
+    """True wenn >70% der Buchstaben Großbuchstaben sind (typischer Trump-Post)."""
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 20:
+        return False
+    return sum(1 for c in letters if c.isupper()) / len(letters) > 0.70
+
 def find_all_tickers(text: str) -> list[tuple[str, str]]:
     """
     Tier 1 – symbol  : kombinierter Regex über alle ~7000 Symbole → "hoch"
@@ -463,24 +459,36 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
     results:     list[tuple[str, str]] = []
     seen:        set[str]              = set()
     has_finance: bool                  = is_financially_relevant(text)
+    all_caps:    bool                  = _is_mostly_uppercase(text)
 
     # Tier 1 — kombinierter Regex: O(text_length), deckt alle ~7000 Symbole ab
+    # Schutz vor Phantom-Tickern: mehrdeutige Symbole (englische Wörter) und
+    # ALL-CAPS-Posts brauchen ein $-Präfix, sonst zählt nur Tier 2 (Firmenname).
     for m in _TIER1_REGEX.finditer(text):
         t = m.group(1).upper()
-        if t not in seen:
-            results.append((t, "hoch"))
-            seen.add(t)
+        if t in seen:
+            continue
+        has_dollar_prefix = m.start() > 0 and text[m.start() - 1] == "$"
+        if not has_dollar_prefix and (t in _AMBIGUOUS_SYMBOLS or all_caps):
+            continue
+        results.append((t, "hoch"))
+        seen.add(t)
 
     # Tier 4: Plural/Possessiv normalisieren vor Tier-2-Matching
     normalized = re.sub(r"'s\b", "", text)
     normalized = re.sub(r"(\b[A-Za-z]{3,})(s)\b", lambda m: m.group(1), normalized)
 
     # Tier 2 — Firmenname/CEO (nur Ticker mit nicht-leeren company-Aliases)
+    # Aliases < 4 Zeichen ohne Ziffer/& (auto-generierter Junk wie 'Api', 'Fb')
+    # werden ignoriert — sie matchen case-insensitiv praktisch jeden Text.
+    # '3M', 'P&G', 'S&T' bleiben erlaubt; reine Kürzel matchen weiter via Tier 1.
     for ticker, tiers in ENTITIES.items():
         t = ticker.upper()
         if t in seen or not tiers.get("company"):
             continue
         for alias in tiers["company"]:
+            if len(alias) < 4 and not re.search(r'[\d&]', alias):
+                continue
             if re.search(r'\b' + re.escape(alias) + r'\b', normalized, re.IGNORECASE):
                 results.append((t, "hoch"))
                 seen.add(t)
@@ -507,6 +515,42 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 CNN_ARCHIVE_URL = "https://ix.cnn.io/data/truth-social/truth_archive.json"
+TRUMPSTRUTH_FEED = "https://trumpstruth.org/feed"
+
+# Browser-ähnlicher User-Agent — einige Feeds (z.B. CNBC) blocken Default-UAs
+FEED_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def _parse_feed(url: str):
+    """
+    RSS/Atom via requests laden (certifi-SSL, Timeout, Browser-UA) und mit
+    feedparser parsen. Robuster als feedparser.parse(url) direkt (urllib).
+    """
+    r = requests.get(url, headers={"User-Agent": FEED_AGENT}, timeout=20)
+    r.raise_for_status()
+    return feedparser.parse(r.content)
+
+
+def _fetch_truth_trumpstruth() -> list[dict]:
+    """
+    Primärquelle: trumpstruth.org RSS-Archiv (kostenlos, kein Key, ~150 KB).
+    Liefert Original-URL auf truthsocial.com via truth:originalUrl Namespace.
+    """
+    feed = _parse_feed(TRUMPSTRUTH_FEED)
+    if feed.bozo and not feed.entries:
+        raise RuntimeError(f"trumpstruth.org Feed nicht lesbar: {feed.bozo_exception}")
+    normalized = []
+    for e in feed.entries:
+        normalized.append({
+            "text":       e.get("summary", e.get("description", e.get("title", ""))),
+            "created_at": e.get("published", ""),
+            "url":        e.get("truth_originalurl",
+                          e.get("link", "https://truthsocial.com/@realDonaldTrump")),
+            "_source":    "trumpstruth.org",
+        })
+    return normalized
+
 
 def _fetch_truth_cnn() -> list[dict]:
     """
@@ -532,7 +576,9 @@ def _fetch_truth_cnn() -> list[dict]:
 
 
 def _fetch_truth_scrapecreators() -> list[dict]:
-    """Fallback: ScapeCreators API (kostenpflichtig, aber zuverlässig)."""
+    """Letzter Fallback: ScrapeCreators API (kostenpflichtig, optional)."""
+    if not SCRAPE_KEY:
+        return []
     url     = (f"https://api.scrapecreators.com/v1/truthsocial/user/posts"
                f"?user_id={TRUMP_TRUTH_ID}&limit=20")
     headers = {"x-api-key": SCRAPE_KEY}
@@ -566,16 +612,26 @@ def _fetch_truth_scrapecreators() -> list[dict]:
 
 
 def fetch_truth_social() -> list[dict]:
-    """CNN-Archiv zuerst, ScapeCreators als Fallback."""
+    """
+    Kostenlose Quellen zuerst: trumpstruth.org (leicht) → CNN-Archiv (15 MB)
+    → ScrapeCreators (kostenpflichtig, nur wenn Key gesetzt).
+    """
+    try:
+        posts = _fetch_truth_trumpstruth()
+        log.info(f"  Truth Social (trumpstruth.org): {len(posts)} Posts")
+        if posts:
+            return posts
+    except Exception as e:
+        log.warning(f"  ⚠️  trumpstruth.org nicht verfügbar: {e} → CNN-Archiv Fallback")
     try:
         posts = _fetch_truth_cnn()
         log.info(f"  Truth Social (CNN-Archiv): {len(posts)} Posts")
         if posts:
             return posts
     except Exception as e:
-        log.warning(f"  ⚠️  CNN-Archiv nicht verfügbar: {e} → ScapeCreators Fallback")
+        log.warning(f"  ⚠️  CNN-Archiv nicht verfügbar: {e} → ScrapeCreators Fallback")
     posts = _fetch_truth_scrapecreators()
-    log.info(f"  Truth Social (ScapeCreators): {len(posts)} Posts")
+    log.info(f"  Truth Social (ScrapeCreators): {len(posts)} Posts")
     return posts
 
 
@@ -719,61 +775,6 @@ def holdings_html_block() -> str:
         ptr_map = {r[0]: r for r in ptr_rows}  # ticker → row
     except Exception:
         ptr_map = {}
-
-    def _ptr_badge(ticker):
-        r = ptr_map.get(ticker)
-        if not r:
-            return ""
-        _, _, buys, sells, last_date, history = r
-        net  = buys - sells
-        txs  = [x.split("|") for x in (history or "").split(",") if x]
-        last = txs[-1][0] if txs else ""
-        prev_net = sum(1 if t[0]=="KAUF" else -1 if t[0]=="VERKAUF" else 0 for t in txs[:-1])
-        if net <= 0:
-            return ('<span style="background:#fee2e2;color:#dc2626;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">VERKAUFT</span>')
-        if prev_net <= 0:
-            return ('<span style="background:#d1fae5;color:#059669;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">NEU</span>')
-        if last == "KAUF":
-            return (f'<span style="background:#dbeafe;color:#2563eb;font-size:10px;'
-                    f'font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">'
-                    f'+{buys}× KAUF</span>')
-        if last == "VERKAUF" and net > 0:
-            return ('<span style="background:#fef3c7;color:#d97706;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">REDUZIERT</span>')
-        return ""
-
-    def _badge_ptr_only(buys, sells, history):
-        net = buys - sells
-        txs = [x.split("|") for x in (history or "").split(",") if x]
-        last = txs[-1][0] if txs else ""
-        prev_net = sum(1 if t[0]=="KAUF" else -1 if t[0]=="VERKAUF" else 0 for t in txs[:-1])
-        if net <= 0:
-            return ('<span style="background:#fee2e2;color:#dc2626;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;">VERKAUFT</span>')
-        if prev_net <= 0 and net > 0:
-            return ('<span style="background:#d1fae5;color:#059669;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;">NEU</span>')
-        if last == "KAUF":
-            return ('<span style="background:#dbeafe;color:#2563eb;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;">AUFGESTOCKT</span>')
-        if last == "VERKAUF" and net > 0:
-            return ('<span style="background:#fef3c7;color:#d97706;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;">REDUZIERT</span>')
-        return ('<span style="background:#f0f0f0;color:#6e6e73;font-size:10px;'
-                'font-weight:700;padding:2px 6px;border-radius:4px;">GEHALTEN</span>')
-        if prev_net <= 0 and net > 0:
-            return ('<span style="background:#d1fae5;color:#059669;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;">NEU</span>')
-        if last_type == "KAUF" and buys > 1:
-            return ('<span style="background:#dbeafe;color:#2563eb;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;">AUFGESTOCKT</span>')
-        if last_type == "VERKAUF" and net > 0:
-            return ('<span style="background:#fef3c7;color:#d97706;font-size:10px;'
-                    'font-weight:700;padding:2px 6px;border-radius:4px;">REDUZIERT</span>')
-        return ('<span style="background:#f0f0f0;color:#6e6e73;font-size:10px;'
-                'font-weight:700;padding:2px 6px;border-radius:4px;">GEHALTEN</span>')
 
     th = ('style="padding:0 10px 6px 0;font-size:10px;font-weight:600;color:#9ca3af;'
           'text-align:left;text-transform:uppercase;letter-spacing:0.06em;"')
@@ -1213,7 +1214,7 @@ def fetch_financial_rss() -> list[dict]:
     results = []
     for name, url in FINANCIAL_RSS_FEEDS:
         try:
-            feed = feedparser.parse(url)
+            feed = _parse_feed(url)
             arts = [_rss_to_dict(e, name) for e in feed.entries[:20]]
             results.extend(arts)
             log.info(f"  {name}: {len(arts)} Artikel")
@@ -1221,15 +1222,31 @@ def fetch_financial_rss() -> list[dict]:
             log.warning(f"  ⚠️  {name} Fehler: {ex}")
     return results
 
+# whitehouse.gov/feed/ liefert seit dem Website-Relaunch 404 — diese drei
+# Unterfeeds funktionieren und decken News, Executive Orders und Statements ab.
+WHITEHOUSE_FEEDS = [
+    "https://www.whitehouse.gov/news/feed/",
+    "https://www.whitehouse.gov/presidential-actions/feed/",
+    "https://www.whitehouse.gov/briefings-statements/feed/",
+]
+
 def fetch_whitehouse() -> list:
-    try:
-        feed    = feedparser.parse("https://www.whitehouse.gov/feed/")
-        entries = feed.entries[:30]
-        log.info(f"  White House RSS: {len(entries)} Einträge")
-        return entries
-    except Exception as e:
-        log.warning(f"  ⚠️  White House RSS Fehler: {e}")
-        return []
+    entries: list = []
+    seen_links: set[str] = set()
+    for url in WHITEHOUSE_FEEDS:
+        try:
+            feed = _parse_feed(url)
+            for e in feed.entries[:30]:
+                link = e.get("link", "")
+                if link and link in seen_links:
+                    continue  # gleicher Beitrag in mehreren WH-Feeds
+                if link:
+                    seen_links.add(link)
+                entries.append(e)
+        except Exception as e:
+            log.warning(f"  ⚠️  White House RSS Fehler ({url}): {e}")
+    log.info(f"  White House RSS: {len(entries)} Einträge (3 Feeds, dedupliziert)")
+    return entries
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1267,7 +1284,15 @@ def _oge_via_playwright() -> list[dict]:
     """
     OGE-Portal mit Playwright — rendert JavaScript, findet echte PDF-Links.
     Gibt [{pdf_url, source}] zurück.
+
+    Läuft nur wenn OGE_FULL=1 (im Workflow nur 1× täglich gesetzt) — der
+    Chromium-Download bei jedem Stundenlauf kostet sonst ~2 min CI-Zeit,
+    obwohl neue PTRs nur alle paar Wochen erscheinen. Whitehouse.gov-
+    Disclosures werden weiterhin stündlich geprüft (billiger HTTP-GET).
     """
+    if os.getenv("OGE_FULL") != "1":
+        log.info("  OGE Portal (Playwright) übersprungen — nur im Tageslauf (OGE_FULL=1)")
+        return []
     try:
         from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
     except ImportError:
@@ -1332,7 +1357,7 @@ def fetch_oge_ptr_links() -> list[dict]:
                 "?q=Trump+%22Periodic+Transaction+Report%22+OGE"
                 "&hl=en-US&gl=US&ceid=US:en"
             )
-            feed = feedparser.parse(rss_url)
+            feed = _parse_feed(rss_url)
             for entry in feed.entries[:5]:
                 title = entry.get("title", "")
                 link  = entry.get("link", "")
@@ -2253,6 +2278,52 @@ def trump_holding_info(ticker: str) -> str:
         f"(letzter Eintrag: {last_date}, Quelle: {last_pdf[:60]}…)"
     )
 
+
+_POSITION_PERF_CACHE: dict[str, str] = {}
+
+def trump_position_performance(ticker: str) -> str:
+    """
+    Kursentwicklung seit Trumps erstem bekannten Kauf (frühestes KAUF-Datum
+    aus trump_holdings). Beispiel: '+141% (seit Kauf am 2025-05-27)'.
+    Leerstring wenn kein Kaufdatum oder keine Kursdaten verfügbar.
+    """
+    t = ticker.upper()
+    if t in _POSITION_PERF_CACHE:
+        return _POSITION_PERF_CACHE[t]
+
+    rows = conn.execute(
+        "SELECT tx_date FROM trump_holdings "
+        "WHERE ticker=? AND tx_type='KAUF' AND tx_date IS NOT NULL AND tx_date != ''",
+        (t,),
+    ).fetchall()
+    buy_dates = []
+    for (raw,) in rows:
+        raw = (raw or "").strip()
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
+            try:
+                buy_dates.append(datetime.strptime(raw[:10], fmt).date())
+                break
+            except ValueError:
+                continue
+    if not buy_dates:
+        _POSITION_PERF_CACHE[t] = ""
+        return ""
+
+    first_buy = min(buy_dates)
+    result = ""
+    try:
+        yf_sym = YF_TICKER_MAP.get(t, t)
+        hist = yf.Ticker(yf_sym).history(
+            start=first_buy.isoformat(), auto_adjust=True, timeout=15
+        )
+        if not hist.empty and float(hist["Close"].iloc[0]) > 0:
+            pct = (float(hist["Close"].iloc[-1]) / float(hist["Close"].iloc[0]) - 1) * 100
+            result = f"{pct:+.0f}% (seit Kauf am {first_buy.isoformat()})"
+    except Exception as e:
+        log.warning(f"  ⚠️  Position-Performance ({ticker}): {e}")
+    _POSITION_PERF_CACHE[t] = result
+    return result
+
 # ─────────────────────────────────────────────────────────────────────────────
 # YAHOO FINANCE  –  Marktdaten
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2527,7 +2598,7 @@ _HAIKU_TRADE_PROMPT = (
 )
 
 
-def _haiku_tradeable(ticker: str, text: str, finbert: str) -> bool:
+def _haiku_tradeable(ticker: str, text: str) -> bool:
     """
     Stufe 1 — Haiku entscheidet ob der Signal handelbar ist (~$0.0002).
     Nur bei JA folgt der teure Sonnet-Call.
@@ -2578,17 +2649,18 @@ def analyze_and_alert(
         log.info(f"  ⏭️  {ticker} [{priority}] + {confidence} Konfidenz → übersprungen")
         return
 
-    # ── Stufe 0: FinBERT (lokal, kostenlos) ──────────────────────────────────
-    finbert_sent = get_finbert_sentiment(raw_text)
-    holding_info = trump_holding_info(ticker)
-
-    # ── Rate-Limit-Check (vor jedem Sonnet-Call) ─────────────────────────────
+    # ── Rate-Limit-Check (vor jeder weiteren Arbeit) ─────────────────────────
     if not _rate_limit_ok(ticker):
         return
 
     # ── Stufe 1: Haiku-Tradability-Screen (nur Medium/Low/Unknown) ───────────
-    if priority != "high" and not _haiku_tradeable(ticker, raw_text, finbert_sent):
+    if priority != "high" and not _haiku_tradeable(ticker, raw_text):
         return  # High-Priority-Ticker überspringen diesen Screen
+
+    holding_info = trump_holding_info(ticker)
+    holding_perf = trump_position_performance(ticker)
+    if holding_perf:
+        holding_info += f" | Performance seit Trump-Kauf: {holding_perf}"
 
     # ── Marktdaten erst NACH Haiku-Screen — spart ~70% der yfinance-Calls ────
     market_data  = fetch_market_data(ticker)
@@ -2624,7 +2696,6 @@ MARKET DATA ({ticker}):
 
 DETECTION CONFIDENCE: {conf_desc}
 TRUMP FINANCIAL INTEREST: {holding_info}
-FINBERT: {finbert_sent}
 
 ANALYSIS FORMAT — respond exactly:
 
@@ -2634,7 +2705,6 @@ EVENT_DATE: [YYYY-MM-DD of when the described event actually occurred, NOT the a
 EVENT_SUMMARY: [One sentence: what Trump said/did]
 SENTIMENT: [BULLISH / BEARISH / NEUTRAL] for {ticker}
 SENTIMENT_BASIS: [Quote from text — max 15 words]
-FINBERT_ALIGNMENT: [AGREES / DISAGREES / PARTIAL]
 PRICE_ALREADY_REACTED: [YES ({chg_1d:+.1f}% today) / NO / UNCLEAR]
 MAGNITUDE_ESTIMATE: [SMALL <3% / MEDIUM 3-10% / LARGE >10%] — [one-sentence rationale]
 TIME_TO_IMPACT: [IMMEDIATE / SHORT 1-5 days / MEDIUM 1-4 weeks / UNCLEAR]
@@ -2776,7 +2846,18 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
 
     analysis_html = _render_analysis(alert_text)
 
-    # ── HTML-E-Mail ──────────────────────────────────────────────────────────
+    # ── Trump-Positions-Box (nur wenn Trump die Aktie selbst hält) ───────────
+    perf_box = ""
+    if holding_perf:
+        perf_box = f"""
+  <tr><td style="background:#ffffff;padding:0 32px 16px;">
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 18px;">
+      <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+         font-size:13px;line-height:1.5;color:#92400e;">
+        💼 <strong>Trump hält {ticker}</strong> &nbsp;·&nbsp; {holding_perf}
+      </p>
+    </div>
+  </td></tr>"""
     html_body = f"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -2855,7 +2936,7 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
            line-height:1.6;color:#1d1d1f;white-space:pre-wrap;">{market_block}</pre>
     </div>
   </td></tr>
-
+{perf_box}
   <!-- TURBO-EMPFEHLUNG -->
   <tr><td style="background:#ffffff;padding:0 32px 24px;">
     <p style="margin:0 0 10px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
@@ -2890,7 +2971,6 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
        border-top:1px solid #e5e5ea;">
     <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
        font-size:11px;color:#6e6e73;line-height:1.6;">
-      FinBERT-Sentiment: {finbert_sent} &nbsp;·&nbsp;
       Modell: {MODEL} &nbsp;·&nbsp;
       Zeitfenster: letzte {LOOKBACK_HOURS}h<br>
       Generiert: {now_utc().strftime('%Y-%m-%d %H:%M UTC')}
@@ -2905,14 +2985,16 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
 """
     if direction == "NO_TRADE" and not SEND_NO_TRADE:
         log.info(f"  ⏭️  {ticker} NO_TRADE → kein Alert (config: send_no_trade=false)")
-        return True  # analysiert, aber kein Alert
+        return False  # analysiert, aber keine E-Mail
 
     dir_emoji = {"LONG": "📈", "SHORT": "📉"}.get(direction, "❓")
     conf_tag  = {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
-    subject   = f"{dir_emoji} Trump-Impact – {ticker}{conf_tag} [{direction}] – {source}"
-    send_gmail(subject, html_body)
-    log.info(f"  🎯 Alert gesendet: {ticker} | {direction} | {source} | FinBERT: {finbert_sent}")
-    return True
+    hold_tag  = " 💼" if holding_perf else ""  # Trump hält diese Aktie selbst
+    subject   = f"{dir_emoji} Trump-Impact – {ticker}{conf_tag}{hold_tag} [{direction}] – {source}"
+    sent = send_gmail(subject, html_body)
+    if sent:
+        log.info(f"  🎯 Alert gesendet: {ticker} | {direction} | {source}")
+    return sent
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BACKTESTING  –  Alert-Outcome nach 24h / 7d nachfüllen
@@ -3041,15 +3123,10 @@ def main():
     def _run_analysis(source, ts, text, ticker, url, confidence):
         nonlocal processed, emails_sent
         processed += 1
-        analyze_and_alert(source, ts, text, ticker, url, confidence)
-        # E-Mail wurde gesendet wenn 🎯 im Log erschiene — wir prüfen über DB
-        # Einfachster Proxy: letzter DB-Eintrag für diesen Hash
-        h = event_hash(ticker, text)
-        if conn.execute("SELECT 1 FROM events WHERE hash=?", (h,)).fetchone():
+        sent = bool(analyze_and_alert(source, ts, text, ticker, url, confidence))
+        if sent:
             emails_sent += 1
-            analyzed_log.append({"ticker": ticker, "source": source, "sent": True})
-        else:
-            analyzed_log.append({"ticker": ticker, "source": source, "sent": False})
+        analyzed_log.append({"ticker": ticker, "source": source, "sent": sent})
 
     def _sorted_tickers(tickers: list) -> list:
         """Sortiert hoch vor niedrig/claude, begrenzt auf MAX_TICKERS_PER_ART."""
@@ -3196,6 +3273,16 @@ def main():
 
     # Tägliche Summary (nur einmal pro Tag, wenn keine Alerts verschickt wurden)
     _maybe_send_daily_summary(analyzed_log, emails_sent)
+
+    # WAL explizit in alerts.db zurückschreiben — der Workflow committet nur
+    # alerts.db, nicht alerts.db-wal. Ohne Checkpoint ginge der Dedup-Stand
+    # verloren → doppelte E-Mails im nächsten Run.
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.warning(f"  ⚠️  WAL-Checkpoint fehlgeschlagen: {e}")
 
 
 def _maybe_send_daily_summary(analyzed_log: list[dict], emails_sent: int) -> None:

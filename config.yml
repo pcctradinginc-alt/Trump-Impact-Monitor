@@ -7096,7 +7096,7 @@ thresholds:
   lookback_hours: 3
 
 sources:
-  # Truth Social via CNN-Archiv (primär) + ScapeCreators (Fallback)
+  # Truth Social: trumpstruth.org (primär) → CNN-Archiv → ScrapeCreators (optional)
   truth_social: true
 
   # Finanz-RSS-Feeds (Reuters, CNBC, MarketWatch etc.)

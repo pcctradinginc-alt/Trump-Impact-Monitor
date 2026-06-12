@@ -3,15 +3,18 @@ name: Trump Impact Monitor
 on:
   schedule:
     - cron: '0 * * * *'       # stündlich
-    - cron: '25 13 * * 1-5'   # 09:25 ET (5 min vor NYSE-Öffnung, Mo-Fr)
+    - cron: '25 13 * * 1-5'   # 09:25 ET (5 min vor NYSE-Öffnung, Mo-Fr) + OGE-Tageslauf
     - cron: '55 20 * * 1-5'   # 16:55 ET (5 min vor NYSE-Schluss, Mo-Fr)
   workflow_dispatch:          # manueller Start via GitHub UI
 
 permissions:
   contents: write          # needed for git push (DB update)
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+# Nie zwei Läufe parallel — verhindert Push-Konflikte auf alerts.db
+# und damit verlorene Dedup-Daten (= doppelte E-Mails).
+concurrency:
+  group: trump-monitor
+  cancel-in-progress: false
 
 jobs:
   monitor:
@@ -32,17 +35,15 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      # ── 3a. HuggingFace Model Cache (FinBERT ~400 MB) ─────────────
-      - name: Cache HuggingFace models
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/huggingface
-          key: finbert-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            finbert-${{ runner.os }}-
+      # ── 3. Dependencies ────────────────────────────────────────────
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      # ── 3b. Playwright Browser Cache (~300 MB) ─────────────────────
+      # ── 3b. Playwright Chromium — nur im OGE-Tageslauf (09:25 ET)
+      #        und bei manuellem Start. Spart ~2 min pro Stundenlauf;
+      #        neue OGE-PTRs erscheinen nur alle paar Wochen.
       - name: Cache Playwright browsers
+        if: github.event.schedule == '25 13 * * 1-5' || github.event_name == 'workflow_dispatch'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
@@ -50,15 +51,11 @@ jobs:
           restore-keys: |
             playwright-${{ runner.os }}-
 
-      # ── 4. Dependencies ────────────────────────────────────────────
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      # ── 4b. Playwright Chromium (für OGE-Portal JS-Rendering) ──────
       - name: Install Playwright Chromium
+        if: github.event.schedule == '25 13 * * 1-5' || github.event_name == 'workflow_dispatch'
         run: playwright install chromium --with-deps
 
-      # ── 5. Run monitor ─────────────────────────────────────────────
+      # ── 4. Run monitor ─────────────────────────────────────────────
       - name: Run Trump Impact Monitor
         env:
           ANTHROPIC_API_KEY:       ${{ secrets.ANTHROPIC_API_KEY }}
@@ -66,15 +63,30 @@ jobs:
           GMAIL_EMAIL:             ${{ secrets.GMAIL_EMAIL }}
           GMAIL_APP_PASSWORD:      ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL:         ${{ secrets.RECIPIENT_EMAIL }}
-          HF_HUB_DISABLE_PROGRESS_BARS: "1"
+          OGE_FULL:                ${{ (github.event.schedule == '25 13 * * 1-5' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
         run: python -u main.py
 
       # ── 5. Commit updated SQLite DB back to repo ───────────────────
+      #     pull --rebase + Retry: ohne das schlägt der Push fehl, sobald
+      #     ein anderer Lauf zwischenzeitlich committet hat → Dedup-Stand
+      #     ginge verloren → doppelte E-Mails.
       - name: Commit updated alerts.db
         run: |
           git config --global user.name  "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           git add alerts.db
-          git diff --staged --quiet && echo "No DB changes to commit." || \
-            git commit -m "chore: update alerts.db [skip ci]"
-          git push
+          if git diff --staged --quiet; then
+            echo "No DB changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: update alerts.db [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            if git push; then
+              exit 0
+            fi
+            echo "Push fehlgeschlagen (Versuch $i/3) – retry in 10s"
+            sleep 10
+          done
+          echo "::error::alerts.db konnte nicht gepusht werden"
+          exit 1

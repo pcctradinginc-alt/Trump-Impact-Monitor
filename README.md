@@ -1,137 +1,145 @@
-[README.md](https://github.com/user-attachments/files/28196544/README.md)
-# 🚨 Trump-Impact Monitor v2.4
+# 🚨 Trump-Impact Monitor v2.5
 
-Hourly automated monitoring of Trump-related news with AI-powered financial impact analysis.  
-**No local setup required – 100% deployable via GitHub browser UI.**
+Stündliches automatisches Monitoring aller öffentlichen Trump-Verlautbarungen mit KI-gestützter Finanz-Impact-Analyse und Trade-Empfehlungen per E-Mail.
+**Nur kostenlose Quellen – kein lokales Setup nötig – 100 % deploybar über die GitHub-Browser-UI.**
 
 ---
 
-## ⚡ Quick Deploy (Browser Only – 5 Steps)
+## ⚡ Quick Deploy (Browser only – 5 Schritte)
 
-### Step 1 – Create GitHub Repo
+### Schritt 1 – GitHub-Repo erstellen
 
-1. Go to [github.com/new](https://github.com/new)
+1. [github.com/new](https://github.com/new) öffnen
 2. Name: `trump-impact-monitor`
-3. Visibility: **Private** ✅
-4. Click **Create repository**
+3. Sichtbarkeit: **Private** ✅ (Hinweis: bei privaten Repos sind 2 000 Actions-Minuten/Monat frei – der Monitor ist darauf optimiert; bei **Public** sind Actions-Minuten unbegrenzt kostenlos)
+4. **Create repository**
 
 ---
 
-### Step 2 – Upload All Files
+### Schritt 2 – Alle Dateien hochladen
 
-In your new repo, click **"uploading an existing file"** (or use **Add file → Upload files**):
-
-Upload these files keeping the exact folder structure:
+Im neuen Repo **"uploading an existing file"** (oder **Add file → Upload files**):
 
 ```
 trump-impact-monitor/
 ├── .github/
 │   └── workflows/
-│       └── trump-monitor.yml     ← must be in this exact path!
-├── alerts.db                     ← upload the empty one provided
+│       └── trump-monitor.yml     ← muss exakt in diesem Pfad liegen!
+├── alerts.db                     ← die leere mitgelieferte Datei
 ├── main.py
+├── config.py
+├── config.yml
 ├── requirements.txt
 ├── entities.json
 └── init_db.py
 ```
 
-> **Tip for the workflow file:** GitHub's upload UI doesn't create subfolders automatically.  
-> Use the browser file editor instead:  
-> Click **"Create new file"** → type `.github/workflows/trump-monitor.yml` in the name field  
-> → paste the content → **Commit**.
+> **Tipp für die Workflow-Datei:** Die Upload-UI legt keine Unterordner an.
+> Stattdessen: **"Create new file"** → als Dateiname `.github/workflows/trump-monitor.yml` eingeben → Inhalt einfügen → **Commit**.
 
 ---
 
-### Step 3 – Add GitHub Secrets
+### Schritt 3 – GitHub Secrets anlegen
 
-Go to **Settings → Secrets and variables → Actions → New repository secret**
+**Settings → Secrets and variables → Actions → New repository secret**
 
-| Secret Name | Value |
+| Secret | Wert | Pflicht? |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | `sk-ant-…` (Claude-Key) | ✅ |
+| `GMAIL_EMAIL` | `deinname@gmail.com` | ✅ |
+| `GMAIL_APP_PASSWORD` | 16-stelliges Gmail-App-Passwort (s.u.) | ✅ |
+| `RECIPIENT_EMAIL` | Empfängeradresse für Alerts | ✅ |
+| `SCRAPE_CREATORS_API_KEY` | Optionaler Fallback für Truth Social (kostenpflichtig) | ❌ optional |
+
+**Gmail-App-Passwort erstellen:**
+1. Google-Konto → Sicherheit → 2-Faktor-Authentifizierung (muss AN sein)
+2. „App-Passwörter" suchen → „Mail" wählen → Name „GitHub Actions"
+3. 16-Zeichen-Code kopieren (ohne Leerzeichen)
+
+---
+
+### Schritt 4 – Manuellen Testlauf starten
+
+**Actions → Trump Impact Monitor → Run workflow → Run workflow**
+
+In den Logs sollten die Quellen erscheinen; bei einem Treffer kommt eine E-Mail.
+
+---
+
+### Schritt 5 – Fertig ✅
+
+Der Workflow läuft ab jetzt **automatisch jede volle Stunde** (plus 5 min vor NYSE-Öffnung/-Schluss).
+Bei neuen Alerts erscheint ein Commit `chore: update alerts.db`.
+
+---
+
+## 📁 Datei-Übersicht
+
+| Datei | Zweck |
 |---|---|
-| `ANTHROPIC_API_KEY` | `sk-ant-...` (your Claude key) |
-| `SCRAPE_CREATORS_API_KEY` | Your ScrapeCreators key (100 free credits) |
-| `NEWSAPI_KEY` | Your NewsAPI.org key (free tier works) |
-| `GMAIL_EMAIL` | `yourname@gmail.com` |
-| `GMAIL_APP_PASSWORD` | 16-char Gmail App Password (see below) |
-| `RECIPIENT_EMAIL` | Where alerts should be sent |
-
-**Create Gmail App Password:**
-1. Google Account → Security → 2-Step Verification (must be ON)
-2. Search "App passwords" → Select "Mail" → Name it "GitHub Actions"
-3. Copy the 16-character code (no spaces)
+| `main.py` | Kernlogik: fetch → Entity-Resolution → LLM → E-Mail |
+| `config.yml` | Watchlist, Schwellenwerte, Quellen an/aus – ohne Code-Änderung anpassbar |
+| `config.py` | Lädt config.yml als typisierte Konstanten |
+| `entities.json` | Ticker → Keyword-Mappings (~7 000 Symbole, frei erweiterbar) |
+| `.github/workflows/trump-monitor.yml` | GitHub-Actions-Cron-Job |
+| `alerts.db` | SQLite-Deduplizierung (wird automatisch zurückcommittet) |
+| `init_db.py` | Optional: DB lokal vorab erzeugen |
 
 ---
 
-### Step 4 – Test Manual Run
-
-Go to **Actions → Trump Impact Monitor (hourly) → Run workflow → Run workflow**
-
-Check the logs – you should see sources being fetched and (if a match is found) an e-mail arriving.
-
----
-
-### Step 5 – Done ✅
-
-The workflow now runs **every full hour automatically**.  
-A new commit `chore: update alerts.db` appears each run if new alerts were found.
-
----
-
-## 📁 File Overview
-
-| File | Purpose |
-|---|---|
-| `main.py` | Core logic: fetch → entity-resolve → LLM → e-mail |
-| `requirements.txt` | Python dependencies (minimal, fast install) |
-| `entities.json` | Ticker → keyword mappings (extend freely) |
-| `.github/workflows/trump-monitor.yml` | GitHub Actions cron job |
-| `alerts.db` | SQLite deduplication database (auto-committed) |
-| `init_db.py` | Optional: pre-create DB locally |
-
----
-
-## 🔍 How It Works
+## 🔍 Funktionsweise
 
 ```
-Every hour:
-  ┌─ Truth Social (ScrapeCreators API)
-  ├─ NewsAPI.org (all sources, Donald Trump)
-  ├─ NewsAPI.org (CNBC only, Donald Trump)
-  └─ White House RSS
+Jede Stunde (nur kostenlose Quellen):
+  ┌─ Truth Social     trumpstruth.org RSS → CNN-Archiv → (optional ScrapeCreators)
+  ├─ Finanz-News      CNBC, MarketWatch, Yahoo, Seeking Alpha, WSJ, Google News, Politico
+  ├─ White House      news/, presidential-actions/, briefings-statements/ Feeds
+  ├─ Federal Register Executive Orders & Proklamationen (offizielle API)
+  ├─ SEC EDGAR        Trump Form 4 / 13D Insider-Filings (offizielle API)
+  └─ OGE 278-T/278e   Periodic Transaction Reports (1× täglich Vollscan)
          │
          ▼
-  Entity Resolution (entities.json)
-         │
-    Ticker found?
-         │ Yes
+  Entity Resolution (entities.json, 3-Tier + ALL-CAPS-Schutz)
+         │  Ticker gefunden? (sonst: Claude-Sektor-Inferenz)
          ▼
-  Claude Sonnet (Anthropic API)
-  → Sentiment + Investment check + Summary + Turbo suggestion
+  Haiku-Pre-Screen (~$0.0002) → nur bei ACTIONABLE:
+  Claude Sonnet: Sentiment · Magnitude · Trade-Richtung · Stop-Level
+  + Trump-Interessenkonflikt inkl. Performance seit Trump-Kauf
          │
          ▼
-  Gmail Alert (SMTP + App Password)
-  SQLite saved (deduplication)
+  Gmail-Alert (HTML) · SQLite-Dedup · 4h-Ticker-Cooldown · Tages-Cap
 ```
+
+**Dedup-Schutz gegen Doppel-E-Mails:**
+- SQLite-Hash pro (Ticker, Text) – über Runs hinweg via Repo-Commit
+- 4-h-Cooldown pro Ticker (gleiche Story aus mehreren Medien = 1 Alert)
+- Workflow-`concurrency`-Lock – nie zwei Läufe parallel
+- `git pull --rebase` + Retry beim DB-Commit – kein Verlust des Dedup-Stands
+- White-House-Feeds werden untereinander per Link dedupliziert
 
 ---
 
-## ✏️ Extend entities.json
+## 💰 Kosten
 
-Add any company you want to monitor:
+| Dienst | Kosten |
+|---|---|
+| Alle Datenquellen | **0 €** (trumpstruth.org, CNN-Archiv, RSS, Federal Register, EDGAR, OGE) |
+| Anthropic Claude | Pay-per-use: Haiku-Screen ~$0.0002, Sonnet-Analyse ~$0.005/Alert, Tages-Cap 40 Calls |
+| Gmail | 0 € (App-Passwort) |
+| GitHub Actions | 0 € bei Public; bei Private ~2–3 min/Lauf → passt in die freien 2 000 min/Monat |
+| ScrapeCreators | Optional, nur als letzter Truth-Social-Fallback |
+
+---
+
+## ✏️ entities.json erweitern
 
 ```json
-"NVDA": ["Nvidia", "NVDA", "Jensen Huang", "H100", "Blackwell"]
+"NVDA": {
+  "symbol": ["NVDA"],
+  "company": ["Nvidia", "Jensen Huang"],
+  "weak": ["H100", "Blackwell"]
+}
 ```
 
-The key is the ticker symbol (used in e-mail subject), values are keywords to match in articles/posts.
-
----
-
-## 🛠️ API Keys (all free tiers available)
-
-| Service | Free Tier | Get Key |
-|---|---|---|
-| Anthropic Claude | Pay-per-use (~$0.003/alert) | [console.anthropic.com](https://console.anthropic.com) |
-| ScrapeCreators | 100 free credits | [scrapecreators.com](https://scrapecreators.com) |
-| NewsAPI | 100 req/day free | [newsapi.org/register](https://newsapi.org/register) |
-| Gmail | Free (App Password) | [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) |
+`symbol` = exaktes Tickersymbol, `company` = Firmenname/CEO (case-insensitiv),
+`weak` = Produktnamen (matchen nur in Finanzkontext).
