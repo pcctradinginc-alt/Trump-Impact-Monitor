@@ -2395,33 +2395,73 @@ def format_market_block(ticker: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Puffer-Zonen je Risikobereitschaft (KO-Abstand zum aktuellen Kurs)
 _TURBO_PROFILES = {
-    "konservativ": {"puffer": 0.20, "hebel_min": 5,  "hebel_max": 9},
-    "mittel":      {"puffer": 0.16, "hebel_min": 8,  "hebel_max": 14},
-    "aggressiv":   {"puffer": 0.13, "hebel_min": 12, "hebel_max": 18},
+    # Der KO-Puffer legt den Hebel mathematisch fest: Hebel ≈ 1 / KO-Abstand
+    # (Open-End-Turbo: KO ≈ Strike). Mehr Gap-Schutz = zwangsläufig weniger Hebel.
+    "konservativ": {"puffer": 0.20},   # ⇒ Hebel ~5x
+    "mittel":      {"puffer": 0.16},   # ⇒ Hebel ~6x
+    "aggressiv":   {"puffer": 0.13},   # ⇒ Hebel ~8x
 }
 TURBO_RISIKO = "mittel"   # global konfigurierbar
 
+# Der onvista-KO-Finder akzeptiert KEINE URL-Parameter (verifiziert: alle
+# Query-Params und Slug-Varianten werden ignoriert bzw. redirecten zurück).
+# Deshalb: generischer Finder-Link + Deep-Link auf die Basiswert-Seite.
+ONVISTA_KO_FINDER = "https://www.onvista.de/derivate/Knock-Outs"
 
-def _onvista_url(ticker: str, direction: str) -> str:
+_ONVISTA_PAGE_CACHE: dict = {}
+
+def _onvista_underlying_url(ticker: str) -> str | None:
     """
-    Erzeugt einen direkten onvista Knock-Out-Finder-Link.
-    onvista kennt US-Tickers nicht direkt — wir landen auf der Suchergebnisseite.
+    Löst den US-Ticker über die öffentliche onvista-Such-API zur deutschen
+    Basiswert-Seite auf (enthält die Knock-Out-Box mit handelbaren Turbos).
+    Fallback: Suche per Firmenname aus entities.json (z.B. BA → 'Boeing',
+    da onvista US-Heimatsymbole nicht immer direkt kennt).
     """
-    richtung = "call" if direction == "LONG" else "put"
-    # Direkt-URL zum Knock-Out-Finder mit Suchbegriff
-    return (
-        f"https://www.onvista.de/derivate/Knock-Outs"
-        f"?TYPE=KNOCK_OUT&UNDERLYING_SEARCH={ticker}"
-        f"&OPTION_TYPE={richtung.upper()}"
-        f"&ISSUER=Vontobel,SG,HSBC,BNP"
-    )
+    t = ticker.upper()
+    if t in _ONVISTA_PAGE_CACHE:
+        return _ONVISTA_PAGE_CACHE[t]
+
+    search_terms = [t]
+    company = (ENTITIES.get(t, {}).get("company") or [None])[0]
+    if company:
+        search_terms.append(company)
+
+    url = None
+    for term in search_terms:
+        try:
+            r = requests.get(
+                "https://api.onvista.de/api/v1/instruments/query",
+                params={"searchValue": term},
+                headers={"User-Agent": FEED_AGENT}, timeout=10,
+            )
+            r.raise_for_status()
+            for item in r.json().get("list", []):
+                if item.get("entityType") != "STOCK":
+                    continue
+                sym = (item.get("homeSymbol") or item.get("symbol") or "").upper()
+                # Ticker-Suche: Symbol muss exakt passen.
+                # Namens-Suche: erster Aktien-Treffer gilt.
+                if sym == t or term != t:
+                    url = item.get("urls", {}).get("WEBSITE")
+                    break
+            if url:
+                break
+        except Exception as e:
+            log.warning(f"  ⚠️  onvista-Suche ({term}): {e}")
+    _ONVISTA_PAGE_CACHE[t] = url
+    return url
 
 
-def _calc_atm_iv(ticker: str) -> float | None:
+def _calc_hv30(ticker: str) -> float | None:
     """
-    Schätzt implizite Volatilität aus 30-Tage historischer Volatilität (yfinance).
-    Gibt None zurück wenn nicht berechenbar.
+    30-Tage historische Volatilität (annualisiert) als IV-Proxy — kostenlose
+    Echtzeit-IV gibt es nicht. Respektiert das globale yfinance-Rate-Limit.
     """
+    global _YF_LAST_CALL
+    wait = _YF_MIN_INTERVAL - (time.time() - _YF_LAST_CALL)
+    if wait > 0:
+        time.sleep(wait)
+    _YF_LAST_CALL = time.time()
     try:
         hist = yf.Ticker(YF_TICKER_MAP.get(ticker.upper(), ticker.upper())).history(
             period="2mo", auto_adjust=True, timeout=15
@@ -2437,18 +2477,17 @@ def _calc_atm_iv(ticker: str) -> float | None:
 
 def turbo_recommendation(ticker: str, direction: str) -> str:
     """
-    Berechnet optimale Turbo-Parameter basierend auf:
-    - Aktuellem Kurs (yfinance)
-    - Historischer Volatilität (30T HV als IV-Proxy)
-    - Risikobereitschaft (TURBO_RISIKO)
+    Berechnet KONSISTENTE Turbo-Parameter für einen News-Trade:
+    - KO-Puffer nach Risikoprofil, bei hoher Volatilität vergrößert (Gap-Risiko
+      bei Trump-News: Überschrift kann sich über Nacht drehen)
+    - Hebel wird aus dem Puffer ABGELEITET (Hebel ≈ 1/KO-Abstand) statt
+      unabhängig vorgegeben — KO-Abstand und Hebel können sich bei einem
+      Turbo nicht unabhängig voneinander wählen lassen
+    - Auswahlkriterien fürs konkrete Papier: Emittent, Spread, Preisbereich
 
-    Kriterien für News-Trade nach Trump-Post:
-    - KO-Abstand: 13–23 % (Puffer gegen Gap-Risiko)
-    - Hebel: 7–16x
-    - Spread: < 0.8 % (manuell auf onvista prüfen)
-    - Emittenten: Vontobel, SG, HSBC, BNP
-    - Typ: Open End Turbo (keine Laufzeit)
-    - Preis: 4–25 € (praktisch handelbar)
+    Die finale WKN-Auswahl trifft der Nutzer im Finder — eine kostenlose
+    Echtzeit-API für Zertifikate-Suche existiert nicht (onvista-Finder-API
+    ist intern/undokumentiert, finanzen.net blockt Bots).
     """
     if direction == "UNKLAR":
         return "⛔ Keine Empfehlung – Trade-Richtung unklar"
@@ -2457,67 +2496,54 @@ def turbo_recommendation(ticker: str, direction: str) -> str:
     if not data:
         return "⛔ Keine Empfehlung – Marktdaten nicht verfügbar"
 
-    price  = data["price"]
-    prof   = _TURBO_PROFILES[TURBO_RISIKO]
-    hv     = _calc_atm_iv(ticker)
+    price = data["price"]
+    hv    = _calc_hv30(ticker)
 
     # Puffer dynamisch: bei hoher Volatilität größerer KO-Abstand
-    puffer = prof["puffer"]
+    puffer = _TURBO_PROFILES[TURBO_RISIKO]["puffer"]
     if hv is not None and hv > 0.45:   # >45 % annualisierte Vol → konservativer
         puffer = min(puffer + 0.04, 0.25)
     elif hv is not None and hv < 0.20: # <20 % Vol → etwas aggressiver okay
         puffer = max(puffer - 0.02, 0.13)
 
-    onvista_url = _onvista_url(ticker, direction)
+    is_long  = direction == "LONG"
+    ko       = round(price * (1 - puffer if is_long else 1 + puffer), 2)
+    abstand  = round(puffer * 100, 1)
+    hebel    = round(1 / puffer, 1)        # Turbo-Mathematik: Hebel ≈ 1/Abstand
+    hebel_lo = round(hebel * 0.85, 1)      # ±15% Suchband um den implizierten
+    hebel_hi = round(hebel * 1.15, 1)      # Hebel (reale KOs liegen nie exakt)
+    ko_op    = "≤" if is_long else "≥"
+    emoji    = "📈" if is_long else "📉"
+    typ      = "Long" if is_long else "Short"
+    hv_info  = f"{hv*100:.1f}% (30T HV als IV-Proxy)" if hv else "k.A."
+    company  = (ENTITIES.get(ticker.upper(), {}).get("company") or [ticker])[0]
 
-    if direction == "LONG":
-        ko       = round(price * (1 - puffer), 2)
-        abstand  = round(puffer * 100, 1)
-        hebel_lo = prof["hebel_min"]
-        hebel_hi = prof["hebel_max"]
-        approx_lever = round(price / (price - ko), 1)
-        hv_info  = f"{hv*100:.1f}% (30T HV)" if hv else "k.A."
-        return (
-            f"📈 LONG Open End Turbo auf {ticker}\n"
-            f"\n"
-            f"   Kurs aktuell:      {price:.2f} USD\n"
-            f"   Volatilität:       {hv_info}\n"
-            f"   ──────────────────────────────────\n"
-            f"   Empf. KO-Bereich:  ≤ {ko:.2f} USD  ({abstand}% Abstand)\n"
-            f"   Hebel-Ziel:        {hebel_lo}–{hebel_hi}x  (approx. ~{approx_lever}x)\n"
-            f"   ──────────────────────────────────\n"
-            f"   Emittenten:        Vontobel · SG · HSBC · BNP\n"
-            f"   Max. Spread:       < 0.8 %\n"
-            f"   Preis-Ziel:        4–25 €\n"
-            f"   Typ:               Open End (keine Laufzeit)\n"
-            f"\n"
-            f"   🔍 onvista Finder:\n"
-            f"   {onvista_url}"
-        )
-    else:  # SHORT
-        ko       = round(price * (1 + puffer), 2)
-        abstand  = round(puffer * 100, 1)
-        hebel_lo = prof["hebel_min"]
-        hebel_hi = prof["hebel_max"]
-        approx_lever = round(price / (ko - price), 1)
-        hv_info  = f"{hv*100:.1f}% (30T HV)" if hv else "k.A."
-        return (
-            f"📉 SHORT Open End Turbo auf {ticker}\n"
-            f"\n"
-            f"   Kurs aktuell:      {price:.2f} USD\n"
-            f"   Volatilität:       {hv_info}\n"
-            f"   ──────────────────────────────────\n"
-            f"   Empf. KO-Bereich:  ≥ {ko:.2f} USD  ({abstand}% Abstand)\n"
-            f"   Hebel-Ziel:        {hebel_lo}–{hebel_hi}x  (approx. ~{approx_lever}x)\n"
-            f"   ──────────────────────────────────\n"
-            f"   Emittenten:        Vontobel · SG · HSBC · BNP\n"
-            f"   Max. Spread:       < 0.8 %\n"
-            f"   Preis-Ziel:        4–25 €\n"
-            f"   Typ:               Open End (keine Laufzeit)\n"
-            f"\n"
-            f"   🔍 onvista Finder:\n"
-            f"   {onvista_url}"
-        )
+    links = []
+    page_url = _onvista_underlying_url(ticker)
+    if page_url:
+        links.append(f"   Basiswert-Seite (mit Knock-Out-Box):\n   {page_url}")
+    links.append(f"   KO-Finder (Filter unten manuell setzen):\n   {ONVISTA_KO_FINDER}")
+    links_block = "\n".join(links)
+
+    return (
+        f"{emoji} {typ} Open End Turbo auf {ticker}\n"
+        f"\n"
+        f"   Kurs aktuell:      {price:.2f} USD\n"
+        f"   Volatilität:       {hv_info}\n"
+        f"   ──────────────────────────────────\n"
+        f"   Knock-Out:         {ko_op} {ko:.2f} USD  ({abstand}% Abstand)\n"
+        f"   Hebel impliziert:  ~{hebel}x  (Suchband {hebel_lo}–{hebel_hi}x)\n"
+        f"   Hinweis: Hebel ≈ 1/KO-Abstand — mehr Puffer = weniger Hebel\n"
+        f"   ──────────────────────────────────\n"
+        f"   Finder-Filter:     Basiswert „{company}“ · {typ} · KO {ko_op} {ko:.2f}\n"
+        f"   Emittenten:        Vontobel · SG · HSBC · BNP\n"
+        f"   Max. Spread:       < 0.8 %\n"
+        f"   Preis-Ziel:        4–25 €\n"
+        f"   Typ:               Open End (keine Laufzeit)\n"
+        f"\n"
+        f"   🔍 Zertifikat auswählen:\n"
+        f"{links_block}"
+    )
 
 
 def parse_trade_direction(alert_text: str) -> str:
@@ -2797,6 +2823,12 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
     # ── Turbo-Empfehlung ─────────────────────────────────────────────────────
     turbo_dir   = "UNKLAR" if direction == "NO_TRADE" else direction
     turbo_block = turbo_recommendation(ticker, turbo_dir)
+    # URLs im Turbo-Block klickbar machen (Text bleibt sonst unverändert)
+    turbo_html  = re.sub(
+        r'(https?://[^\s<]+)',
+        r'<a href="\1" style="color:#0071e3;">\1</a>',
+        html.escape(turbo_block),
+    )
 
     # ── SQLite-Dedup ─────────────────────────────────────────────────────────
     h = event_hash(ticker, raw_text)
@@ -2945,10 +2977,7 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
     </p>
     <div style="background:#f0fdf4;border-radius:10px;padding:14px 18px;border:1px solid #d1fae5;">
       <pre style="margin:0;font-family:'SF Mono',Menlo,monospace;font-size:12px;
-           line-height:1.6;color:#1d1d1f;white-space:pre-wrap;">{turbo_block.replace(
-               _onvista_url(ticker, turbo_dir),
-               f'<a href="{_onvista_url(ticker, turbo_dir)}" style="color:#0071e3;">onvista Knock-Out-Finder öffnen ↗</a>'
-           )}</pre>
+           line-height:1.6;color:#1d1d1f;white-space:pre-wrap;">{turbo_html}</pre>
     </div>
   </td></tr>
 
