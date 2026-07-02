@@ -1376,7 +1376,7 @@ def fetch_oge_ptr_links() -> list[dict]:
     return unique
 
 
-def parse_oge_ptr_pdf(pdf_url: str, db_conn=None) -> list[dict]:
+def parse_oge_ptr_pdf(pdf_url: str, db_conn=None, pdf_bytes: bytes | None = None) -> list[dict]:
     """
     Lädt ein OGE 278-T PDF und extrahiert Transaktionszeilen mit pdfplumber.
     Gibt [{asset, tx_type, date, amount, row_text}] zurück.
@@ -1388,10 +1388,12 @@ def parse_oge_ptr_pdf(pdf_url: str, db_conn=None) -> list[dict]:
         log.warning("  ⚠️  pdfplumber nicht installiert — PDF-Parsing übersprungen")
         return []
     try:
-        r = requests.get(pdf_url, headers=OGE_HEADERS, timeout=30)
-        r.raise_for_status()
+        if pdf_bytes is None:
+            r = requests.get(pdf_url, headers=OGE_HEADERS, timeout=30)
+            r.raise_for_status()
+            pdf_bytes = r.content
         transactions = []
-        with pdfplumber.open(io.BytesIO(r.content)) as pdf:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             for page in pdf.pages:
                 # Tabellenbasiert
                 for table in (page.extract_tables() or []):
@@ -1492,6 +1494,140 @@ def _save_oge_holdings(transactions: list[dict], pdf_url: str, db_conn=None) -> 
         log.info(f"  💾 OGE Holdings: {saved} Ticker in trump_holdings gespeichert")
 
 
+_AMOUNT_LOWER_RE = re.compile(r'\$([\d,]+)')
+
+def _amount_lower_bound(amount: str) -> int:
+    """Untere Grenze einer OGE-Betragsspanne: '$250,001 - $500,000' → 250001."""
+    m = _AMOUNT_LOWER_RE.search(amount or "")
+    if not m:
+        return 0
+    try:
+        return int(m.group(1).replace(",", ""))
+    except ValueError:
+        return 0
+
+
+def _fmt_usd(v: int) -> str:
+    if v >= 1_000_000:
+        return f"${v/1_000_000:.1f}M+"
+    if v >= 1_000:
+        return f"${v/1_000:.0f}K+"
+    return f"${v}+"
+
+
+def _perf_since_date(ticker: str, tx_date: str) -> float | None:
+    """Kursperformance in % vom Transaktionsdatum bis heute (yfinance)."""
+    d = None
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            d = datetime.strptime((tx_date or "").strip()[:10], fmt).date()
+            break
+        except ValueError:
+            continue
+    if not d:
+        return None
+    try:
+        yf_sym = YF_TICKER_MAP.get(ticker, ticker)
+        hist = yf.Ticker(yf_sym).history(start=d.isoformat(), auto_adjust=True, timeout=15)
+        if not hist.empty and float(hist["Close"].iloc[0]) > 0:
+            return (float(hist["Close"].iloc[-1]) / float(hist["Close"].iloc[0]) - 1) * 100
+    except Exception as e:
+        log.warning(f"  ⚠️  Perf seit Kauf ({ticker}): {e}")
+    return None
+
+
+_NEGATIVE_NEWS_KEYWORDS = (
+    "lawsuit", "fraud", "investigation", "probe", "recall", "downgrade",
+    "sec charges", "bankruptcy", "guidance cut", "misses", "plunge", "scandal",
+)
+
+def _recent_headlines(ticker: str, asset_name: str, limit: int = 3) -> list[str]:
+    """Aktuelle Google-News-Schlagzeilen zum Unternehmen (Gratis-RSS)."""
+    company = re.sub(r'\b(INC|CORP|CO|PLC|LTD|COM|NEW|CL A|CL B|CL C)\b', '',
+                     (asset_name or "").upper()).strip().title()
+    q = requests.utils.quote(f'{company or ticker} {ticker} stock', safe='')
+    try:
+        feed = _parse_feed(
+            f"https://news.google.com/rss/search?q={q}+when:14d&hl=en-US&gl=US&ceid=US:en")
+        return [e.get("title", "") for e in feed.entries[:limit] if e.get("title")]
+    except Exception as e:
+        log.warning(f"  ⚠️  News-Check ({ticker}): {e}")
+        return []
+
+
+def _interpret_top_buys(top_buys: list[dict]) -> list[dict]:
+    """
+    Reichert die größten Käufe eines PTR mit Performance seit Kaufdatum,
+    aktuellen Schlagzeilen und einem Claude-Interpretationshinweis an.
+    Eingabe: [{ticker, asset, badge, total_lower, txs}] — Ausgabe erweitert um
+    first_date, perf_since, headlines, news_warning, rating, hinweis.
+    """
+    enriched = []
+    for b in top_buys:
+        earliest = min((tx.get("tx_date", "") for tx in b["txs"] if tx.get("tx_date")),
+                       default="")
+        perf  = _perf_since_date(b["ticker"], earliest)
+        heads = _recent_headlines(b["ticker"], b["asset"])
+        warn  = any(kw in h.lower() for h in heads for kw in _NEGATIVE_NEWS_KEYWORDS)
+        enriched.append({**b, "first_date": earliest, "perf_since": perf,
+                         "headlines": heads, "news_warning": warn,
+                         "rating": "", "hinweis": ""})
+
+    # Ein Haiku-Call für alle Positionen (Kostenoptimierung)
+    try:
+        lines = []
+        for b in enriched:
+            perf_s = f"{b['perf_since']:+.1f}%" if b["perf_since"] is not None else "unbekannt"
+            lines.append(
+                f"- {b['ticker']} ({b['asset'][:40]}): {b['badge']}, "
+                f"Volumen ≥{_fmt_usd(b['total_lower'])} über {len(b['txs'])} Tx, "
+                f"erster Kauf {b['first_date'] or 'unbekannt'}, "
+                f"Performance seit Kauf: {perf_s}, "
+                f"Schlagzeilen: {'; '.join(b['headlines']) or 'keine gefunden'}"
+            )
+        prompt = (
+            "Du bewertest Käufe aus Trumps OGE-278-T-Filing für einen deutschen "
+            "Privatanleger, der überlegt, Positionen trotz Melde-Latenz nachzukaufen.\n"
+            "Positionen:\n" + "\n".join(lines) + "\n\n"
+            "Für jede Position: nüchterne 1-2-Satz-Einschätzung auf Deutsch. "
+            "Berücksichtige: Ist die Position seit Trumps Kauf schon stark gelaufen "
+            "(Nachkauf teurer)? Gibt es negative Schlagzeilen? Wie groß/überzeugt "
+            "wirkt der Kauf (NEW BUY mit hohem Volumen = stärkstes Signal)?\n"
+            'Antworte NUR als JSON-Array: [{"ticker": "...", '
+            '"rating": "attraktiv|neutral|vorsicht", "hinweis": "..."}]'
+        )
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        m = re.search(r'\[.*\]', resp.content[0].text, re.DOTALL)
+        for row in (json.loads(m.group(0)) if m else []):
+            for b in enriched:
+                if b["ticker"] == str(row.get("ticker", "")).upper():
+                    b["rating"]  = str(row.get("rating", "")).lower()
+                    b["hinweis"] = str(row.get("hinweis", ""))
+    except Exception as e:
+        log.warning(f"  ⚠️  Interpretations-Call fehlgeschlagen: {e}")
+
+    # Regelbasierter Fallback wenn Claude nichts geliefert hat
+    for b in enriched:
+        if b["rating"]:
+            continue
+        if b["news_warning"]:
+            b["rating"]  = "vorsicht"
+            b["hinweis"] = "Negative Schlagzeilen seit Kauf — vor Nachkauf prüfen."
+        elif b["perf_since"] is not None and b["perf_since"] > 15:
+            b["rating"]  = "neutral"
+            b["hinweis"] = (f"Seit Trumps Kauf bereits {b['perf_since']:+.0f}% gelaufen — "
+                            f"Einstieg deutlich teurer als sein Kaufkurs.")
+        else:
+            b["rating"]  = "attraktiv"
+            b["hinweis"] = (f"{b['badge']} mit Volumen {_fmt_usd(b['total_lower'])}, "
+                            f"Kurs seit Kauf kaum gelaufen — Latenz-Nachteil gering.")
+    return enriched
+
+
 def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
     """
     Sendet PTR-Alert mit Portfolio-Kontext:
@@ -1571,9 +1707,19 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
     # Aktien-Tabelle (mit Kontext-Badges)
     stock_rows_html = ""
     n_new_buy = n_add = n_sell = n_sold_out = 0
+    buy_positions: dict[str, dict] = {}  # Ticker → aggregierte Kauf-Position
     for tx in stock_txs:
         ticker   = tx["_ticker"]
         label, bg, fg = _context_badge(ticker, tx.get("tx_type","?"))
+        if label in ("NEW BUY", "ADD") and ticker:
+            pos = buy_positions.setdefault(ticker, {
+                "ticker": ticker, "asset": tx.get("asset", ""),
+                "badge": label, "total_lower": 0, "txs": [],
+            })
+            pos["total_lower"] += _amount_lower_bound(tx.get("amount", ""))
+            pos["txs"].append(tx)
+            if label == "NEW BUY":
+                pos["badge"] = "NEW BUY"  # NEW BUY dominiert über ADD
         badge = (f'<span style="background:{bg};color:{fg};font-size:9px;font-weight:700;'
                  f'padding:2px 5px;border-radius:3px;">{label}</span>')
         snap_val = snap_map.get((ticker or "").upper(), "–")
@@ -1613,6 +1759,74 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
         )
     bond_note = f" (erste 30 von {len(other_txs)})" if len(other_txs) > 30 else ""
 
+    # Top-Käufe: größte NEW BUY/ADD-Positionen mit Interpretation & Nachkauf-Check
+    top_buys = sorted(buy_positions.values(),
+                      key=lambda p: p["total_lower"], reverse=True)[:6]
+    interp_html = ""
+    if top_buys:
+        try:
+            enriched = _interpret_top_buys(top_buys)
+        except Exception as e:
+            log.warning(f"  ⚠️  Top-Buy-Interpretation: {e}")
+            enriched = []
+        rating_style = {
+            "attraktiv": ("#d1fae5", "#059669"),
+            "neutral":   ("#fef3c7", "#d97706"),
+            "vorsicht":  ("#fee2e2", "#dc2626"),
+        }
+        rows = ""
+        for b in enriched:
+            bg_r, fg_r = rating_style.get(b["rating"], ("#f5f5f7", "#6e6e73"))
+            perf_s = (f"{b['perf_since']:+.1f}%" if b["perf_since"] is not None else "–")
+            perf_c = ("#059669" if (b["perf_since"] or 0) >= 0 else "#dc2626")
+            news_s = "⚠️ ja" if b["news_warning"] else "keine"
+            rows += (
+                f'<tr style="background:#fff;">'
+                f'<td style="padding:8px 10px 8px 0;font-size:12px;font-weight:700;'
+                f'vertical-align:top;border-bottom:1px solid #f5f5f7;">{b["ticker"]}<br>'
+                f'<span style="font-size:9px;font-weight:400;color:#9ca3af;">'
+                f'{b["asset"][:32]}</span></td>'
+                f'<td style="padding:8px 10px 8px 0;font-size:11px;vertical-align:top;'
+                f'border-bottom:1px solid #f5f5f7;">'
+                f'<span style="background:{"#d1fae5" if b["badge"]=="NEW BUY" else "#dbeafe"};'
+                f'color:{"#059669" if b["badge"]=="NEW BUY" else "#2563eb"};font-size:9px;'
+                f'font-weight:700;padding:2px 5px;border-radius:3px;">{b["badge"]}</span><br>'
+                f'<span style="font-size:10px;color:#6e6e73;">{_fmt_usd(b["total_lower"])}'
+                f' · {len(b["txs"])} Tx</span></td>'
+                f'<td style="padding:8px 10px 8px 0;font-size:11px;font-weight:700;'
+                f'color:{perf_c};vertical-align:top;border-bottom:1px solid #f5f5f7;">'
+                f'{perf_s}<br><span style="font-size:9px;font-weight:400;color:#9ca3af;">'
+                f'seit {b["first_date"] or "?"}</span></td>'
+                f'<td style="padding:8px 10px 8px 0;font-size:10px;color:#6e6e73;'
+                f'vertical-align:top;border-bottom:1px solid #f5f5f7;">{news_s}</td>'
+                f'<td style="padding:8px 0;font-size:10px;vertical-align:top;'
+                f'border-bottom:1px solid #f5f5f7;">'
+                f'<span style="background:{bg_r};color:{fg_r};font-size:9px;font-weight:700;'
+                f'padding:2px 5px;border-radius:3px;text-transform:uppercase;">'
+                f'{b["rating"] or "?"}</span><br>'
+                f'<span style="color:#3c3c43;">{b["hinweis"]}</span></td>'
+                f'</tr>'
+            )
+        if rows:
+            interp_html = f"""
+  <tr><td style="background:#fff;padding:8px 32px 8px;">
+    <p style="margin:12px 0 2px;font-size:10px;font-weight:700;color:#059669;
+       text-transform:uppercase;letter-spacing:0.06em;">
+      💡 Größte Käufe · Interpretation &amp; Nachkauf-Check
+    </p>
+    <table style="border-collapse:collapse;width:100%;">
+      <thead><tr>
+        <th {th}>Ticker</th><th {th}>Kauf</th><th {th}>Seit Kauf</th>
+        <th {th}>Negativ-News</th><th {th}>Einschätzung</th>
+      </tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    <p style="margin:6px 0 0;font-size:9px;color:#9ca3af;">
+      Betrag = untere Grenze der gemeldeten OGE-Spannen, summiert über alle Käufe im PTR.
+      Performance ab erstem Kaufdatum im Filing bis heute. Keine Anlageberatung.
+    </p>
+  </td></tr>"""
+
     html_body = f"""<!DOCTYPE html>
 <html lang="de"><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#f5f5f7;">
@@ -1650,7 +1864,7 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
                ])}
     </tr></table>
   </td></tr>
-
+{interp_html}
   <tr><td style="background:#fff;padding:8px 32px 24px;">
     <p style="margin:12px 0 6px;font-size:10px;font-weight:700;color:#6e6e73;
        text-transform:uppercase;letter-spacing:0.06em;">
@@ -1680,9 +1894,11 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
 </table></td></tr></table>
 </body></html>"""
 
+    top_hint = (f" · Top: {top_buys[0]['ticker']} {_fmt_usd(top_buys[0]['total_lower'])}"
+                if top_buys else "")
     subject = (f"🏛️ Trump PTR: {n_new_buy} NEW BUY · {n_add} ADD · "
                f"{n_sell} SELL · {n_sold_out} SOLD OUT · "
-               f"{len(transactions)} Tx gesamt")
+               f"{len(transactions)} Tx gesamt{top_hint}")
     send_gmail(subject, html_body)
     log.info(f"  📨 PTR Alert: {len(transactions)} Tx · {len(stock_txs)} Aktien · "
              f"{n_new_buy} NEW, {n_add} ADD, {n_sell} SELL, {n_sold_out} SOLD OUT")
@@ -2013,7 +2229,7 @@ def send_278e_alert(pdf_url: str, year: int) -> None:
              f"{n_sold} SOLD OUT, {n_red} REDUCED")
 
 
-def parse_ptr_via_claude_vision(pdf_url: str, db_conn=None) -> list[dict]:
+def parse_ptr_via_claude_vision(pdf_url: str, db_conn=None, pdf_bytes: bytes | None = None) -> list[dict]:
     """
     Parst ein OGE 278-T PTR-PDF via Claude Vision.
     Gibt Liste von Transaktions-Dicts zurück und speichert Aktien in trump_holdings.
@@ -2025,9 +2241,11 @@ def parse_ptr_via_claude_vision(pdf_url: str, db_conn=None) -> list[dict]:
         return []
 
     try:
-        r = requests.get(pdf_url, headers=OGE_HEADERS, timeout=30)
-        r.raise_for_status()
-        doc = fitz.open(stream=r.content, filetype="pdf")
+        if pdf_bytes is None:
+            r = requests.get(pdf_url, headers=OGE_HEADERS, timeout=30)
+            r.raise_for_status()
+            pdf_bytes = r.content
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as e:
         log.warning(f"  ⚠️  PTR Vision: PDF Download Fehler: {e}")
         return []
@@ -2126,11 +2344,89 @@ def reparse_oge_ptr(pdf_url: str) -> None:
     log.info(f"  ♻️  OGE PTR zum Neuparsen freigegeben: {pdf_url[:80]}")
 
 
+def _download_pdf(pdf_url: str) -> bytes | None:
+    """Lädt ein PDF einmalig herunter (für Hash + Parser, kein Doppel-Download)."""
+    try:
+        r = requests.get(pdf_url, headers=OGE_HEADERS, timeout=30)
+        r.raise_for_status()
+        return r.content
+    except Exception as e:
+        log.warning(f"  ⚠️  PDF Download Fehler ({pdf_url[:70]}): {e}")
+        return None
+
+
+def _tx_fingerprint(transactions: list[dict]) -> str:
+    """
+    Reihenfolge-unabhängiger Fingerprint über die extrahierten Transaktionen.
+    Erkennt denselben Bericht auch wenn die PDF-Bytes differieren
+    (z.B. OGE-Portal-Scan vs. Whitehouse.gov-Scan derselben Filing).
+    """
+    keys = sorted(
+        f"{(tx.get('asset') or '')[:40].upper()}|{tx.get('tx_type','')}|"
+        f"{tx.get('tx_date','')}|{tx.get('amount','')}"
+        for tx in transactions
+    )
+    return hashlib.sha256("\n".join(keys).encode("utf-8")).hexdigest()
+
+
+def _known_duplicate_ptr(pdf_url: str, content_hash: str | None,
+                         fingerprint: str | None, db_conn=None) -> str | None:
+    """
+    Prüft ob derselbe PTR bereits unter anderer URL verarbeitet wurde
+    (Byte-Hash oder Transaktions-Fingerprint). Gibt die Original-URL zurück.
+    """
+    c = db_conn or conn
+    for col, val in (("content_hash", content_hash), ("tx_fingerprint", fingerprint)):
+        if not val:
+            continue
+        row = c.execute(
+            f"SELECT pdf_url FROM oge_ptrs WHERE {col}=? AND pdf_url!=?",
+            (val, pdf_url),
+        ).fetchone()
+        if row:
+            return row[0]
+    return None
+
+
+def _fuzzy_duplicate_ptr(pdf_url: str, transactions: list[dict], db_conn=None) -> str | None:
+    """
+    Fuzzy-Dedup gegen unterschiedliche Scan-/Parserversionen desselben Berichts:
+    Wenn ≥90 % der erkannten Aktien-Transaktionen (Ticker|Typ|Datum|Betrag) mit
+    einem früheren PTR übereinstimmen, ist es ein Duplikat.
+    """
+    c = db_conn or conn
+    cand = set()
+    for tx in transactions:
+        t = _ticker_from_asset_name(tx.get("asset", ""))
+        if t:
+            cand.add(f"{t}|{tx.get('tx_type','')}|{tx.get('tx_date','')}|{tx.get('amount','')}")
+    if len(cand) < 10:  # zu wenig Signal für einen belastbaren Vergleich
+        return None
+    for (other_url,) in c.execute(
+        "SELECT DISTINCT pdf_url FROM trump_holdings WHERE pdf_url!=?", (pdf_url,)
+    ).fetchall():
+        other = {
+            f"{r[0]}|{r[1]}|{r[2]}|{r[3]}"
+            for r in c.execute(
+                "SELECT ticker, tx_type, tx_date, amount FROM trump_holdings WHERE pdf_url=?",
+                (other_url,),
+            ).fetchall()
+        }
+        if len(other) < 10:
+            continue
+        overlap = len(cand & other) / min(len(cand), len(other))
+        if overlap >= 0.9:
+            return other_url
+    return None
+
+
 def check_oge_alerts() -> None:
     """
     Prüft auf neue OGE 278-T PDFs.
     - Datum-Filter: nur PDFs der letzten 90 Tage alertieren
     - Kein Alert bei 0 erkannten Transaktionen (PDF-Parser versagt)
+    - Cross-Source-Dedup: Byte-Hash + Transaktions-Fingerprint verhindern
+      Doppel-Alerts wenn dieselbe Filing auf OGE-Portal UND Whitehouse.gov liegt
     """
     log.info("🏛️  OGE 278-T …")
 
@@ -2142,6 +2438,11 @@ def check_oge_alerts() -> None:
             detected_at TEXT
         )
     """)
+    # Migration: Dedup-Spalten für ältere DBs nachziehen
+    existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(oge_ptrs)").fetchall()}
+    for col in ("content_hash", "tx_fingerprint"):
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE oge_ptrs ADD COLUMN {col} TEXT")
     conn.commit()
 
     links = fetch_oge_ptr_links()
@@ -2173,12 +2474,26 @@ def check_oge_alerts() -> None:
     for item in e278_items:
         pdf_url = item["pdf_url"]
         source  = item["source"]
+        # Dedup: identisches 278e-PDF bereits unter anderer URL verarbeitet?
+        pdf_bytes    = _download_pdf(pdf_url)
+        content_hash = hashlib.sha256(pdf_bytes).hexdigest() if pdf_bytes else None
+        dup = _known_duplicate_ptr(pdf_url, content_hash, None)
+        if dup:
+            conn.execute(
+                "INSERT OR IGNORE INTO oge_ptrs (pdf_url,source,tx_count,detected_at,content_hash) "
+                "VALUES (?,?,?,?,?)",
+                (pdf_url, source, 0, now_utc().isoformat(), content_hash))
+            conn.commit()
+            log.info("  ♻️  278e-Duplikat von %s… — übersprungen", dup[:70])
+            continue
         log.info("Neues 278e PDF: %s…", pdf_url[:80])
         year_m = re.search(r'/(\d{4})/', pdf_url)
         year   = int(year_m.group(1)) if year_m else now_utc().year
         n = parse_278e_via_claude_vision(pdf_url, year)
-        conn.execute("INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
-                     (pdf_url, source, n, now_utc().isoformat()))
+        conn.execute(
+            "INSERT OR IGNORE INTO oge_ptrs (pdf_url,source,tx_count,detected_at,content_hash) "
+            "VALUES (?,?,?,?,?)",
+            (pdf_url, source, n, now_utc().isoformat(), content_hash))
         conn.commit()
         if n:
             new_count += 1
@@ -2197,16 +2512,45 @@ def check_oge_alerts() -> None:
         thread_conn.row_factory = sqlite3.Row
 
         try:
-            transactions = parse_oge_ptr_pdf(pdf_url, db_conn=thread_conn)
-            if not transactions:
-                transactions = parse_ptr_via_claude_vision(pdf_url, db_conn=thread_conn)
+            pdf_bytes    = _download_pdf(pdf_url)
+            content_hash = hashlib.sha256(pdf_bytes).hexdigest() if pdf_bytes else None
 
-            thread_conn.execute("INSERT OR IGNORE INTO oge_ptrs VALUES (?,?,?,?)",
-                         (pdf_url, source, len(transactions), now_utc().isoformat()))
+            # Dedup Stufe 1: byte-identisches PDF bereits unter anderer URL gesehen
+            dup = _known_duplicate_ptr(pdf_url, content_hash, None, db_conn=thread_conn)
+            if dup:
+                thread_conn.execute(
+                    "INSERT OR IGNORE INTO oge_ptrs "
+                    "(pdf_url,source,tx_count,detected_at,content_hash) VALUES (?,?,?,?,?)",
+                    (pdf_url, source, 0, now_utc().isoformat(), content_hash))
+                thread_conn.commit()
+                log.info("  ♻️  PTR-Duplikat (Byte-identisch) von %s… — kein Alert", dup[:70])
+                return 0
+
+            transactions = parse_oge_ptr_pdf(pdf_url, db_conn=thread_conn, pdf_bytes=pdf_bytes)
+            if not transactions:
+                transactions = parse_ptr_via_claude_vision(pdf_url, db_conn=thread_conn,
+                                                           pdf_bytes=pdf_bytes)
+
+            # Dedup Stufe 2: gleicher Inhalt trotz anderer PDF-Bytes
+            # (exakter Tx-Fingerprint oder ≥90 % Überlappung mit früherem PTR)
+            fingerprint = _tx_fingerprint(transactions) if transactions else None
+            dup = (_known_duplicate_ptr(pdf_url, None, fingerprint, db_conn=thread_conn)
+                   or _fuzzy_duplicate_ptr(pdf_url, transactions, db_conn=thread_conn))
+
+            thread_conn.execute(
+                "INSERT OR IGNORE INTO oge_ptrs "
+                "(pdf_url,source,tx_count,detected_at,content_hash,tx_fingerprint) "
+                "VALUES (?,?,?,?,?,?)",
+                (pdf_url, source, len(transactions), now_utc().isoformat(),
+                 content_hash, fingerprint))
             thread_conn.commit()
 
             if not transactions:
                 log.warning("OGE PTR: 0 Tx nach Vision — übersprungen: %s", pdf_url)
+                return 0
+
+            if dup:
+                log.info("  ♻️  PTR-Duplikat (inhaltsgleich) von %s… — kein Alert", dup[:70])
                 return 0
 
             if send_alert:
