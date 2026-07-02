@@ -1280,19 +1280,41 @@ def _extract_pdf_links(html_text: str, base_url: str) -> list[str]:
     return links
 
 
+def _oge_portal_link_hash() -> str | None:
+    """
+    Billiger Änderungs-Check fürs OGE-Portal ohne Playwright: HTTP-GET und
+    Hash über die gefundenen Links (nicht das ganze HTML — das kann volatile
+    Elemente wie Timestamps enthalten und würde ständig Änderungen melden).
+    """
+    try:
+        r = requests.get(OGE_PORTAL_URL, headers=OGE_HEADERS, timeout=20)
+        if not r.ok:
+            return None
+        links = sorted(set(re.findall(r'href=["\']([^"\']+)["\']', r.text)))
+        return hashlib.sha256("\n".join(links).encode("utf-8")).hexdigest()
+    except Exception as e:
+        log.warning(f"  OGE Portal Änderungs-Check: {e}")
+        return None
+
+
 def _oge_via_playwright() -> list[dict]:
     """
     OGE-Portal mit Playwright — rendert JavaScript, findet echte PDF-Links.
     Gibt [{pdf_url, source}] zurück.
 
-    Läuft nur wenn OGE_FULL=1 (im Workflow nur 1× täglich gesetzt) — der
-    Chromium-Download bei jedem Stundenlauf kostet sonst ~2 min CI-Zeit,
-    obwohl neue PTRs nur alle paar Wochen erscheinen. Whitehouse.gov-
-    Disclosures werden weiterhin stündlich geprüft (billiger HTTP-GET).
+    Läuft im Tageslauf (OGE_FULL=1) immer. In den Stundenläufen nur, wenn der
+    billige HTML-Link-Hash des Portals sich seit dem letzten Lauf geändert hat —
+    so wird ein neues Filing binnen Stunden statt erst am nächsten Tag erkannt,
+    ohne bei jedem Stundenlauf ~2 min Chromium-Download zu bezahlen.
     """
+    portal_hash = None
     if os.getenv("OGE_FULL") != "1":
-        log.info("  OGE Portal (Playwright) übersprungen — nur im Tageslauf (OGE_FULL=1)")
-        return []
+        portal_hash = _oge_portal_link_hash()
+        if not portal_hash or portal_hash == _state_get("oge_portal_link_hash"):
+            log.info("  OGE Portal (Playwright) übersprungen — keine Änderung erkennbar "
+                     "(voller Scan im Tageslauf, OGE_FULL=1)")
+            return []
+        log.info("  OGE Portal-Links geändert → Playwright-Scan trotz Stundenlauf")
     try:
         from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
     except ImportError:
@@ -1323,6 +1345,11 @@ def _oge_via_playwright() -> list[dict]:
                 log.info("OGE Portal: Trump-PTR gefunden: %s", pdf)
 
         log.info("OGE Portal (Playwright): %d Trump-PDFs gefunden", len(found))
+
+        # Link-Hash als Baseline für die Stundenlauf-Änderungserkennung speichern
+        h = portal_hash or _oge_portal_link_hash()
+        if h:
+            _state_set("oge_portal_link_hash", h)
     except Exception as e:
         log.warning("OGE Playwright Fehler: %s", e)
     return found
@@ -1436,32 +1463,81 @@ def parse_oge_ptr_pdf(pdf_url: str, db_conn=None, pdf_bytes: bytes | None = None
 
 
 # Ticker-Mapping für häufige Asset-Namen in OGE-PDFs
+#
+# Manuelle Overrides für OGE-typische Schreibweisen/OCR-Varianten, bei denen
+# das entities.json-Matching nachweislich danebengriff (Substring, uppercase).
+# Werden VOR dem generischen Matching geprüft — längere Fragmente zuerst listen.
+OGE_TICKER_OVERRIDES: list[tuple[str, str]] = [
+    ("AMERICAN INTERNATIONAL GROUP", "AIG"),
+    ("AMERICAN INTL GROUP",          "AIG"),
+    ("AMERICANA INTL GROUP",         "AIG"),   # OCR-Variante
+    ("AST SPACEMOBILE",              "ASTS"),
+    ("AST SPACEORMOBILE",            "ASTS"),  # OCR-Variante
+    ("CITIZENS FINANCIAL",           "CFG"),
+    ("CITIZENS FINL",                "CFG"),
+    ("ARCH CAPITAL",                 "ACGL"),
+    ("ARCH-CAPITAL",                 "ACGL"),
+    ("HEALTHEQUITY",                 "HQY"),
+    ("HORMEL",                       "HRL"),
+    ("AMERICAN ELECTRIC POWER",      "AEP"),
+    ("AMERICAN ELEC PWR",            "AEP"),
+    ("AMERICAN WATER WORKS",         "AWK"),
+    ("AMERICAN WTR WKS",             "AWK"),
+    ("AMERICAN STS WTR",             "AWR"),
+    ("AMERICAN FINANCIAL GROUP",     "AFG"),
+]
+
+# Aliase die als einzelnes Wort zu generisch sind, um allein einen Ticker zu
+# begründen (tauchen in Dutzenden Asset-Namen auf: "INTERNATIONAL"→IBOC,
+# "CAPITAL"→CBNK, "EQUITY"→EQBK waren reale Fehlzuordnungen).
+_GENERIC_ALIASES = {
+    "INTERNATIONAL", "AMERICAN", "CAPITAL", "EQUITY", "NATIONAL", "UNITED",
+    "GENERAL", "GLOBAL", "FINANCIAL", "ENERGY", "TRUST", "INCOME", "FIRST",
+    "STANDARD", "PACIFIC", "SOUTHERN", "WESTERN", "SECURITY", "COMMUNITY",
+}
+
 def _ticker_from_asset_name(name: str) -> str | None:
     """
     Matcht Asset-Namen (Aktien UND Anleihen) gegen entities.json.
     Gibt den bekannten Ticker zurück wenn ein Firmenname erkannt wird.
 
     Strategie:
-    1. entities.json company-Namen durchsuchen (zuverlässig, ~7000 Firmen)
-    2. Fallback: exaktes Ticker-Symbol in Klammern suchen, z.B. "(BA)"
-    3. KEIN blindes Regex-Matching mehr → verhindert Phantom-Ticker aus Anleihe-OCR
+    1. OGE_TICKER_OVERRIDES (bekannte Problemfälle, höchste Priorität)
+    2. entities.json company-Namen: nur Wortgrenzen-Treffer, generische
+       Ein-Wort-Aliase ausgeschlossen, LÄNGSTER Alias gewinnt (nicht der erste)
+    3. Fallback: exaktes Ticker-Symbol in Klammern, z.B. "(BA)"
 
     Beispiele:
     "BOEING COMPANY SENIOR NOTES DUE 2031" → BA
-    "APPLE INC COMMON STOCK"              → AAPL
-    "THF BOEING COMPANY PERP 3.3%"        → BA  (OCR-Präfix ignoriert)
-    "OPCA GENERAL TRUST GRANT STREET..."  → None (kein Match → verworfen)
+    "AMERICAN INTL GROUP INC"             → AIG  (Override, nicht IBOC)
+    "CITIZENS FINANCIAL GROUP INC"        → CFG  (längster Match, nicht C)
+    "AST SPACEMOBILE INC CL A"            → ASTS (Wortgrenze: kein XOM via 'Mobil')
     """
-    low = name.lower()
+    up = (name or "").upper()
 
-    # 1. entities.json company-Namen (längste zuerst für Präzision)
+    # 1. Manuelle Overrides
+    for fragment, ticker in OGE_TICKER_OVERRIDES:
+        if fragment in up:
+            return ticker
+
+    # 2. entities.json: Wortgrenzen-Match, längster Alias gewinnt
+    best_len, best_ticker = 0, None
     for ticker, tiers in ENTITIES.items():
         for alias in tiers.get("company", []):
-            if alias and len(alias) >= 4 and alias.lower() in low:
-                return ticker.upper()
+            if not alias or len(alias) < 5:
+                continue
+            au = alias.upper()
+            if " " not in au and au in _GENERIC_ALIASES:
+                continue
+            if len(au) <= best_len or au not in up:
+                continue  # schneller Substring-Precheck vor Regex
+            if re.search(rf'(?<![A-Z0-9]){re.escape(au)}(?![A-Z0-9])', up):
+                best_len, best_ticker = len(au), ticker.upper()
+    if best_ticker:
+        return best_ticker
 
-    # 2. Explizites Symbol in Klammern: "... (BA)" oder "... BA)"
-    m = re.search(r'\(([A-Z]{1,5})\)', name)
+    # 3. Explizites Symbol in Klammern: "... (BA)"
+    m = re.search(r'\(([A-Z]{1,5})\)', name or "")
     if m and m.group(1) in ENTITIES:
         return m.group(1)
 
@@ -1496,23 +1572,31 @@ def _save_oge_holdings(transactions: list[dict], pdf_url: str, db_conn=None) -> 
 
 _AMOUNT_LOWER_RE = re.compile(r'\$([\d,]+)')
 
-def _amount_lower_bound(amount: str) -> int:
-    """Untere Grenze einer OGE-Betragsspanne: '$250,001 - $500,000' → 250001."""
-    m = _AMOUNT_LOWER_RE.search(amount or "")
-    if not m:
+def _amount_mid_bound(amount: str) -> int:
+    """
+    Mittelwert einer OGE-Betragsspanne als Ranking-Gewicht:
+    '$5,000,001 - $25,000,000' → 15000000 (statt nur der Untergrenze 5000001,
+    die den Abstand zwischen den Ranges systematisch unterschätzt).
+    """
+    nums = []
+    for raw in _AMOUNT_LOWER_RE.findall(amount or ""):
+        try:
+            nums.append(int(raw.replace(",", "")))
+        except ValueError:
+            continue
+    if not nums:
         return 0
-    try:
-        return int(m.group(1).replace(",", ""))
-    except ValueError:
-        return 0
+    if len(nums) == 1:
+        return nums[0]
+    return (nums[0] + nums[1]) // 2
 
 
 def _fmt_usd(v: int) -> str:
     if v >= 1_000_000:
-        return f"${v/1_000_000:.1f}M+"
+        return f"≈${v/1_000_000:.1f}M"
     if v >= 1_000:
-        return f"${v/1_000:.0f}K+"
-    return f"${v}+"
+        return f"≈${v/1_000:.0f}K"
+    return f"≈${v}"
 
 
 def _perf_since_date(ticker: str, tx_date: str) -> float | None:
@@ -1555,13 +1639,16 @@ def _recent_headlines(ticker: str, asset_name: str, limit: int = 3) -> list[str]
         return []
 
 
-def _interpret_top_buys(top_buys: list[dict]) -> list[dict]:
+def _interpret_top_buys(top_buys: list[dict], exclude_urls: set[str] | None = None) -> list[dict]:
     """
     Reichert die größten Käufe eines PTR mit Performance seit Kaufdatum,
-    aktuellen Schlagzeilen und einem Claude-Interpretationshinweis an.
-    Eingabe: [{ticker, asset, badge, total_lower, txs}] — Ausgabe erweitert um
-    first_date, perf_since, headlines, news_warning, rating, hinweis.
+    aktuellen Schlagzeilen, Konviktions-Signal (wiederholte Käufe über frühere
+    PTRs) und einem Claude-Interpretationshinweis an.
+    Eingabe: [{ticker, asset, badge, total_usd, txs}] — Ausgabe erweitert um
+    first_date, perf_since, headlines, news_warning, prior_filings, prior_usd,
+    rating, hinweis.
     """
+    exclude_urls = exclude_urls or set()
     enriched = []
     for b in top_buys:
         earliest = min((tx.get("tx_date", "") for tx in b["txs"] if tx.get("tx_date")),
@@ -1569,8 +1656,20 @@ def _interpret_top_buys(top_buys: list[dict]) -> list[dict]:
         perf  = _perf_since_date(b["ticker"], earliest)
         heads = _recent_headlines(b["ticker"], b["asset"])
         warn  = any(kw in h.lower() for h in heads for kw in _NEGATIVE_NEWS_KEYWORDS)
+
+        # Konviktion: Käufe desselben Tickers in FRÜHEREN Filings
+        ph = ",".join("?" * len(exclude_urls)) or "''"
+        prior_rows = conn.execute(
+            f"SELECT pdf_url, amount FROM trump_holdings "
+            f"WHERE ticker=? AND tx_type='KAUF' AND pdf_url NOT IN ({ph})",
+            (b["ticker"], *exclude_urls),
+        ).fetchall()
+        prior_filings = len({r[0] for r in prior_rows})
+        prior_usd     = sum(_amount_mid_bound(r[1] or "") for r in prior_rows)
+
         enriched.append({**b, "first_date": earliest, "perf_since": perf,
                          "headlines": heads, "news_warning": warn,
+                         "prior_filings": prior_filings, "prior_usd": prior_usd,
                          "rating": "", "hinweis": ""})
 
     # Ein Haiku-Call für alle Positionen (Kostenoptimierung)
@@ -1578,10 +1677,14 @@ def _interpret_top_buys(top_buys: list[dict]) -> list[dict]:
         lines = []
         for b in enriched:
             perf_s = f"{b['perf_since']:+.1f}%" if b["perf_since"] is not None else "unbekannt"
+            konv_s = (f"bereits in {b['prior_filings']} früheren Filings gekauft "
+                      f"(kumuliert {_fmt_usd(b['prior_usd'])})"
+                      if b["prior_filings"] else "erster bekannter Kauf")
             lines.append(
                 f"- {b['ticker']} ({b['asset'][:40]}): {b['badge']}, "
-                f"Volumen ≥{_fmt_usd(b['total_lower'])} über {len(b['txs'])} Tx, "
+                f"Volumen {_fmt_usd(b['total_usd'])} (Range-Mittelwert) über {len(b['txs'])} Tx, "
                 f"erster Kauf {b['first_date'] or 'unbekannt'}, "
+                f"Konviktion: {konv_s}, "
                 f"Performance seit Kauf: {perf_s}, "
                 f"Schlagzeilen: {'; '.join(b['headlines']) or 'keine gefunden'}"
             )
@@ -1592,7 +1695,8 @@ def _interpret_top_buys(top_buys: list[dict]) -> list[dict]:
             "Für jede Position: nüchterne 1-2-Satz-Einschätzung auf Deutsch. "
             "Berücksichtige: Ist die Position seit Trumps Kauf schon stark gelaufen "
             "(Nachkauf teurer)? Gibt es negative Schlagzeilen? Wie groß/überzeugt "
-            "wirkt der Kauf (NEW BUY mit hohem Volumen = stärkstes Signal)?\n"
+            "wirkt der Kauf (NEW BUY mit hohem Volumen = stärkstes Signal; "
+            "wiederholte Käufe über mehrere Filings = hohe Konviktion)?\n"
             'Antworte NUR als JSON-Array: [{"ticker": "...", '
             '"rating": "attraktiv|neutral|vorsicht", "hinweis": "..."}]'
         )
@@ -1601,8 +1705,7 @@ def _interpret_top_buys(top_buys: list[dict]) -> list[dict]:
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
         )
-        m = re.search(r'\[.*\]', resp.content[0].text, re.DOTALL)
-        for row in (json.loads(m.group(0)) if m else []):
+        for row in _salvage_json_array(resp.content[0].text):
             for b in enriched:
                 if b["ticker"] == str(row.get("ticker", "")).upper():
                     b["rating"]  = str(row.get("rating", "")).lower()
@@ -1623,21 +1726,34 @@ def _interpret_top_buys(top_buys: list[dict]) -> list[dict]:
                             f"Einstieg deutlich teurer als sein Kaufkurs.")
         else:
             b["rating"]  = "attraktiv"
-            b["hinweis"] = (f"{b['badge']} mit Volumen {_fmt_usd(b['total_lower'])}, "
+            b["hinweis"] = (f"{b['badge']} mit Volumen {_fmt_usd(b['total_usd'])}, "
                             f"Kurs seit Kauf kaum gelaufen — Latenz-Nachteil gering.")
     return enriched
 
 
-def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
+def send_oge_alert(filings: list[dict]) -> None:
     """
-    Sendet PTR-Alert mit Portfolio-Kontext:
-    Jede Transaktion wird gegen 278e-Snapshot und bestehende trump_holdings verglichen
-    um NEW BUY / ADD / SELL / SOLD OUT zu bestimmen.
+    Sendet PTR-Alert mit Portfolio-Kontext — bei mehreren neuen Filings in
+    einem Lauf als EINE Digest-Mail mit gemeinsamer Top-Käufe-Sektion.
+    filings: [{pdf_url, source, transactions}]
+    Jede Transaktion wird gegen 278e-Snapshot und bestehende trump_holdings
+    verglichen um NEW BUY / ADD / SELL / SOLD OUT zu bestimmen.
     """
-    # Aktueller 278e-Snapshot als Basis
-    snap_year = conn.execute(
-        "SELECT MAX(year) FROM trump_278e_snapshot"
-    ).fetchone()[0]
+    if not filings:
+        return
+    pdf_urls     = {f["pdf_url"] for f in filings}
+    transactions = [tx for f in filings for tx in f["transactions"]]
+    # Aktueller 278e-Snapshot als Basis. Nicht blind MAX(year): ein
+    # unvollständig geparster Jahrgang (z.B. 41 statt 1400 Zeilen) würde sonst
+    # fast jede Position fälschlich als "nicht in 278e" / NEW BUY ausweisen.
+    year_counts = conn.execute(
+        "SELECT year, COUNT(*) FROM trump_278e_snapshot GROUP BY year"
+    ).fetchall()
+    snap_year = None
+    if year_counts:
+        max_rows = max(c for _, c in year_counts)
+        valid = [y for y, c in year_counts if c >= max_rows * 0.5]
+        snap_year = max(valid) if valid else max(y for y, _ in year_counts)
     snap_map = {}  # ticker → value_range
     if snap_year:
         for ticker, val in conn.execute(
@@ -1647,11 +1763,13 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
             if ticker:
                 snap_map[ticker.upper()] = val
 
-    # Bisherige trump_holdings (alle PTRs vor diesem)
+    # Bisherige trump_holdings (alle PTRs vor den aktuellen)
     prev_holdings = {}  # ticker → net (KAUF=+1, VERKAUF=-1)
+    _ph = ",".join("?" * len(pdf_urls))
     for ticker, tx_type in conn.execute(
-        "SELECT ticker, tx_type FROM trump_holdings WHERE pdf_url!=? AND ticker IS NOT NULL",
-        (pdf_url,)
+        f"SELECT ticker, tx_type FROM trump_holdings "
+        f"WHERE pdf_url NOT IN ({_ph}) AND ticker IS NOT NULL",
+        tuple(pdf_urls)
     ).fetchall():
         if ticker:
             t = ticker.upper()
@@ -1714,9 +1832,9 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
         if label in ("NEW BUY", "ADD") and ticker:
             pos = buy_positions.setdefault(ticker, {
                 "ticker": ticker, "asset": tx.get("asset", ""),
-                "badge": label, "total_lower": 0, "txs": [],
+                "badge": label, "total_usd": 0, "txs": [],
             })
-            pos["total_lower"] += _amount_lower_bound(tx.get("amount", ""))
+            pos["total_usd"] += _amount_mid_bound(tx.get("amount", ""))
             pos["txs"].append(tx)
             if label == "NEW BUY":
                 pos["badge"] = "NEW BUY"  # NEW BUY dominiert über ADD
@@ -1761,11 +1879,12 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
 
     # Top-Käufe: größte NEW BUY/ADD-Positionen mit Interpretation & Nachkauf-Check
     top_buys = sorted(buy_positions.values(),
-                      key=lambda p: p["total_lower"], reverse=True)[:6]
+                      key=lambda p: p["total_usd"], reverse=True)[:6]
     interp_html = ""
+    enriched = []
     if top_buys:
         try:
-            enriched = _interpret_top_buys(top_buys)
+            enriched = _interpret_top_buys(top_buys, exclude_urls=pdf_urls)
         except Exception as e:
             log.warning(f"  ⚠️  Top-Buy-Interpretation: {e}")
             enriched = []
@@ -1791,8 +1910,12 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
                 f'<span style="background:{"#d1fae5" if b["badge"]=="NEW BUY" else "#dbeafe"};'
                 f'color:{"#059669" if b["badge"]=="NEW BUY" else "#2563eb"};font-size:9px;'
                 f'font-weight:700;padding:2px 5px;border-radius:3px;">{b["badge"]}</span><br>'
-                f'<span style="font-size:10px;color:#6e6e73;">{_fmt_usd(b["total_lower"])}'
-                f' · {len(b["txs"])} Tx</span></td>'
+                f'<span style="font-size:10px;color:#6e6e73;">{_fmt_usd(b["total_usd"])}'
+                f' · {len(b["txs"])} Tx</span>'
+                + (f'<br><span style="font-size:9px;font-weight:700;color:#7c3aed;">'
+                   f'🔁 {b["prior_filings"] + 1}. Filing in Folge · zuvor '
+                   f'{_fmt_usd(b["prior_usd"])}</span>' if b.get("prior_filings") else '')
+                + f'</td>'
                 f'<td style="padding:8px 10px 8px 0;font-size:11px;font-weight:700;'
                 f'color:{perf_c};vertical-align:top;border-bottom:1px solid #f5f5f7;">'
                 f'{perf_s}<br><span style="font-size:9px;font-weight:400;color:#9ca3af;">'
@@ -1822,7 +1945,7 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
       <tbody>{rows}</tbody>
     </table>
     <p style="margin:6px 0 0;font-size:9px;color:#9ca3af;">
-      Betrag = untere Grenze der gemeldeten OGE-Spannen, summiert über alle Käufe im PTR.
+      Betrag = Mittelwert der gemeldeten OGE-Spannen, summiert über alle Käufe im PTR.
       Performance ab erstem Kaufdatum im Filing bis heute. Keine Anlageberatung.
     </p>
   </td></tr>"""
@@ -1841,10 +1964,10 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
     </p>
     <h1 style="margin:0;font-family:-apple-system,sans-serif;font-size:22px;
        font-weight:700;color:#f5f5f7;letter-spacing:-0.02em;">
-      Neuer Trump PTR · {now_utc().strftime('%d.%m.%Y')}
+      {f'{len(filings)} neue Trump PTRs' if len(filings) > 1 else 'Neuer Trump PTR'} · {now_utc().strftime('%d.%m.%Y')}
     </h1>
     <p style="margin:6px 0 0;font-family:-apple-system,sans-serif;font-size:12px;color:#6e6e73;">
-      {len(transactions)} Transaktionen gesamt · {len(stock_txs)} Aktien · {len(other_txs)} Anleihen/Sonstiges
+      {len(transactions)} Transaktionen gesamt · {len(stock_txs)} Aktien · {len(other_txs)} Anleihen/Sonstiges{f' · {len(filings)} Filings zusammengefasst' if len(filings) > 1 else ''}
     </p>
   </td></tr>
 
@@ -1885,8 +2008,8 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
   <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:16px 32px;
        border-top:1px solid #e5e5ea;">
     <p style="margin:0;font-family:-apple-system,sans-serif;font-size:11px;color:#6e6e73;">
-      OGE 278-T · {source} · 278e-Basis: {snap_year or "nicht verfügbar"} ·
-      <a href="{pdf_url}" style="color:#0071e3;text-decoration:none;">PDF ↗</a> ·
+      OGE 278-T · 278e-Basis: {snap_year or "nicht verfügbar"} ·
+      {' · '.join(f'<a href="{f["pdf_url"]}" style="color:#0071e3;text-decoration:none;">PDF {i+1} ({f["source"]}) ↗</a>' for i, f in enumerate(filings))} ·
       {now_utc().strftime('%Y-%m-%d %H:%M UTC')}
     </p>
   </td></tr>
@@ -1894,14 +2017,39 @@ def send_oge_alert(pdf_url: str, source: str, transactions: list[dict]) -> None:
 </table></td></tr></table>
 </body></html>"""
 
-    top_hint = (f" · Top: {top_buys[0]['ticker']} {_fmt_usd(top_buys[0]['total_lower'])}"
+    top_hint = (f" · Top: {top_buys[0]['ticker']} {_fmt_usd(top_buys[0]['total_usd'])}"
                 if top_buys else "")
-    subject = (f"🏛️ Trump PTR: {n_new_buy} NEW BUY · {n_add} ADD · "
+    digest_hint = f" ({len(filings)} Filings)" if len(filings) > 1 else ""
+    subject = (f"🏛️ Trump PTR{digest_hint}: {n_new_buy} NEW BUY · {n_add} ADD · "
                f"{n_sell} SELL · {n_sold_out} SOLD OUT · "
                f"{len(transactions)} Tx gesamt{top_hint}")
     send_gmail(subject, html_body)
-    log.info(f"  📨 PTR Alert: {len(transactions)} Tx · {len(stock_txs)} Aktien · "
+    log.info(f"  📨 PTR Alert{digest_hint}: {len(transactions)} Tx · {len(stock_txs)} Aktien · "
              f"{n_new_buy} NEW, {n_add} ADD, {n_sell} SELL, {n_sold_out} SOLD OUT")
+
+    # Nachkauf-These backtesten: Kurs zum Alert-Zeitpunkt festhalten,
+    # record_outcomes() füllt 7d-/30d-Kurse später nach.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ptr_outcomes (
+            ticker      TEXT,
+            pdf_url     TEXT,
+            alerted_at  TEXT,
+            alert_price REAL,
+            price_7d    REAL,
+            price_30d   REAL,
+            PRIMARY KEY (ticker, pdf_url)
+        )
+    """)
+    ref_url = sorted(pdf_urls)[0]
+    for b in enriched:
+        price = fetch_market_data(b["ticker"]).get("price")
+        if not price:
+            continue
+        conn.execute(
+            "INSERT OR IGNORE INTO ptr_outcomes "
+            "(ticker,pdf_url,alerted_at,alert_price) VALUES (?,?,?,?)",
+            (b["ticker"], ref_url, now_utc().isoformat(), price))
+    conn.commit()
 
 
 OGE_LOOKBACK_DAYS = 90  # Nur PDFs der letzten 90 Tage alertieren (wie EDGAR)
@@ -1918,7 +2066,31 @@ def _oge_date_from_url(pdf_url: str) -> str:
 _278E_PART6_START  = 86   # Fallback-Seite wenn Auto-Detection fehlschlägt
 _278E_PART6_END    = 146  # Fallback-Ende
 _VISION_BATCH_SIZE = 5    # Seiten pro API-Call (max ~8 sinnvoll)
+_278E_BATCH_SIZE   = 3    # 278e-Tabellen sind dichter → kleinere Batches gegen Output-Truncation
+_VISION_MAX_TOKENS = 16384
 _VISION_MAX_ERRORS = 3    # Circuit-Breaker: Abbruch nach N aufeinanderfolgenden Fehlern
+
+
+def _salvage_json_array(raw: str) -> list:
+    """
+    Parst ein JSON-Array aus einer Modell-Antwort — auch wenn die Antwort
+    wegen max_tokens mitten im Objekt abbricht (dann bis zum letzten
+    vollständigen Objekt zurückschneiden statt den ganzen Batch zu verlieren).
+    """
+    m = re.search(r'\[.*', raw, re.DOTALL)
+    if not m:
+        return []
+    s = m.group(0)
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        last = s.rfind('}')
+        while last != -1:
+            try:
+                return json.loads(s[:last + 1] + ']')
+            except json.JSONDecodeError:
+                last = s.rfind('}', 0, last)
+        return []
 
 _PTR_EXTRACT_PROMPT = """This is a page from Trump's OGE Form 278-T Periodic Transaction Report.
 Extract EVERY transaction row from the table.
@@ -1989,9 +2161,9 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
         part6_end   = min(_278E_PART6_END, len(doc))
 
     pages_to_parse = list(range(part6_start, part6_end))
-    batches = [pages_to_parse[i:i+_VISION_BATCH_SIZE]
-               for i in range(0, len(pages_to_parse), _VISION_BATCH_SIZE)]
-    log.info(f"  📄 278e: {len(pages_to_parse)} Seiten in {len(batches)} Batches à {_VISION_BATCH_SIZE} (S.{part6_start+1}–{part6_end})")
+    batches = [pages_to_parse[i:i+_278E_BATCH_SIZE]
+               for i in range(0, len(pages_to_parse), _278E_BATCH_SIZE)]
+    log.info(f"  📄 278e: {len(pages_to_parse)} Seiten in {len(batches)} Batches à {_278E_BATCH_SIZE} (S.{part6_start+1}–{part6_end})")
 
     consecutive_errors = 0
     now = now_utc().isoformat()
@@ -2013,12 +2185,14 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
 
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=8192,
+                max_tokens=_VISION_MAX_TOKENS,
                 messages=[{"role": "user", "content": content}],
             )
             raw  = resp.content[0].text.strip()
-            m    = re.search(r'\[.*\]', raw, re.DOTALL)
-            rows = json.loads(m.group(0)) if m else []
+            rows = _salvage_json_array(raw)
+            if resp.stop_reason == "max_tokens":
+                log.warning(f"    Batch {batch_idx+1}: Output truncated — "
+                            f"{len(rows)} Zeilen gerettet")
 
             for row in rows:
                 asset_name  = str(row.get("asset", "")).strip()
@@ -2047,6 +2221,18 @@ def parse_278e_via_claude_vision(pdf_url: str, year: int) -> int:
             log.warning(f"    Batch {batch_idx+1}: {e} ({consecutive_errors}/{_VISION_MAX_ERRORS})")
 
     log.info(f"  ✅ 278e: {total_saved} Positionen gespeichert (Jahr {year})")
+
+    # Vollständigkeits-Check: deutlich weniger Zeilen als im Vorjahr deutet auf
+    # abgebrochenes Parsing hin (Truncation/Circuit-Breaker) — dann warnen,
+    # damit der Snapshot nicht als valide Basis missverstanden wird.
+    prev_count = conn.execute(
+        "SELECT COUNT(*) FROM trump_278e_snapshot WHERE year=(SELECT MAX(year) "
+        "FROM trump_278e_snapshot WHERE year<?)", (year,)
+    ).fetchone()[0]
+    if prev_count and total_saved < prev_count * 0.5:
+        log.warning(f"  ⚠️  278e {year}: nur {total_saved} Zeilen vs. {prev_count} "
+                    f"im Vorjahr — Snapshot vermutlich unvollständig")
+
     if total_saved > 0:
         send_278e_alert(pdf_url, year)
     else:
@@ -2275,12 +2461,14 @@ def parse_ptr_via_claude_vision(pdf_url: str, db_conn=None, pdf_bytes: bytes | N
 
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=8192,
+                max_tokens=_VISION_MAX_TOKENS,
                 messages=[{"role": "user", "content": content}],
             )
             raw  = resp.content[0].text.strip()
-            m    = re.search(r'\[.*\]', raw, re.DOTALL)
-            rows = json.loads(m.group(0)) if m else []
+            rows = _salvage_json_array(raw)
+            if resp.stop_reason == "max_tokens":
+                log.warning(f"    PTR Batch {batch_idx+1}: Output truncated — "
+                            f"{len(rows)} Zeilen gerettet")
             consecutive_errors = 0
 
             for row in rows:
@@ -2342,6 +2530,80 @@ def reparse_oge_ptr(pdf_url: str) -> None:
     conn.execute("DELETE FROM oge_ptrs WHERE pdf_url=?", (pdf_url,))
     conn.commit()
     log.info(f"  ♻️  OGE PTR zum Neuparsen freigegeben: {pdf_url[:80]}")
+
+
+def _state_get(key: str) -> str | None:
+    conn.execute("CREATE TABLE IF NOT EXISTS monitor_state (key TEXT PRIMARY KEY, value TEXT)")
+    row = conn.execute("SELECT value FROM monitor_state WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def _state_set(key: str, value: str) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS monitor_state (key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute("INSERT INTO monitor_state (key,value) VALUES (?,?) "
+                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+    conn.commit()
+
+
+def _remap_ticker_data() -> None:
+    """
+    Einmalige Migration: Ticker in trump_holdings und trump_278e_snapshot mit
+    dem gehärteten Mapping neu berechnen. Korrigiert historische Fehlzuordnungen
+    (IBOC statt AIG, CBNK statt ACGL, C für Anleihen etc.), auf denen Badges,
+    Performance und Fuzzy-Dedup aufbauen.
+    """
+    if _state_get("ticker_remap_v2") == "done":
+        return
+    log.info("  🔧 Ticker-Remap-Migration (einmalig) …")
+    cache: dict[str, str | None] = {}
+    fixed = 0
+    for table, name_col in (("trump_holdings", "asset_name"),
+                            ("trump_278e_snapshot", "asset_name")):
+        rows = conn.execute(
+            f"SELECT rowid, {name_col}, ticker FROM {table}").fetchall()
+        for rowid, asset_name, old_ticker in rows:
+            key = (asset_name or "").strip().upper()
+            if key not in cache:
+                cache[key] = _ticker_from_asset_name(asset_name or "")
+            new_ticker = cache[key]
+            if new_ticker != old_ticker:
+                conn.execute(f"UPDATE {table} SET ticker=? WHERE rowid=?",
+                             (new_ticker, rowid))
+                fixed += 1
+    conn.commit()
+    _state_set("ticker_remap_v2", "done")
+    log.info(f"  ✅ Ticker-Remap: {fixed} Zeilen korrigiert")
+
+
+def _maybe_reparse_incomplete_278e() -> None:
+    """
+    Erkennt einen unvollständigen 278e-Snapshot (deutlich weniger Zeilen als das
+    beste Jahr — Folge von Output-Truncation/Circuit-Breaker beim Vision-Parse)
+    und parst das zugehörige PDF im Tageslauf (OGE_FULL=1) neu.
+    Max. 1 Versuch pro Woche, um API-Kosten zu begrenzen.
+    """
+    if os.getenv("OGE_FULL") != "1":
+        return
+    year_counts = conn.execute(
+        "SELECT year, COUNT(*) FROM trump_278e_snapshot GROUP BY year").fetchall()
+    if len(year_counts) < 2:
+        return
+    max_rows = max(c for _, c in year_counts)
+    latest_year, latest_rows = max(year_counts)
+    if latest_rows >= max_rows * 0.5:
+        return
+    last_try = _state_get("278e_reparse_attempt")
+    if last_try and last_try > (now_utc() - timedelta(days=7)).isoformat():
+        return
+    row = conn.execute(
+        "SELECT pdf_url FROM trump_278e_snapshot WHERE year=? LIMIT 1",
+        (latest_year,)).fetchone()
+    if not row or not row[0]:
+        return
+    _state_set("278e_reparse_attempt", now_utc().isoformat())
+    log.info(f"  ♻️  278e {latest_year} unvollständig ({latest_rows} vs. {max_rows} "
+             f"Zeilen) → Neuparse")
+    parse_278e_via_claude_vision(row[0], latest_year)
 
 
 def _download_pdf(pdf_url: str) -> bytes | None:
@@ -2444,6 +2706,12 @@ def check_oge_alerts() -> None:
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE oge_ptrs ADD COLUMN {col} TEXT")
     conn.commit()
+
+    # Einmalig: historische Fehlzuordnungen mit gehärtetem Mapping korrigieren
+    _remap_ticker_data()
+
+    # Unvollständigen 278e-Snapshot ggf. neu parsen (nur Tageslauf, max 1×/Woche)
+    _maybe_reparse_incomplete_278e()
 
     links = fetch_oge_ptr_links()
     if not links:
@@ -2551,27 +2819,37 @@ def check_oge_alerts() -> None:
 
             if dup:
                 log.info("  ♻️  PTR-Duplikat (inhaltsgleich) von %s… — kein Alert", dup[:70])
-                return 0
+                return None
 
             if send_alert:
-                send_oge_alert(pdf_url, source, transactions)
-                return 1
+                # Nicht hier senden: alertbare Filings werden nach dem Pool
+                # gesammelt und als EINE Digest-Mail verschickt.
+                return {"pdf_url": pdf_url, "source": source,
+                        "transactions": transactions}
             else:
                 log.info("  📥 Historischer PTR geparst (%d Tx) — kein Alert", len(transactions))
-                return 0
+                return None
         finally:
             thread_conn.close()
 
     # PTRs parallel mit max 3 gleichzeitigen Threads
+    alertable: list[dict] = []
     if ptr_items:
         log.info("OGE: %d PTRs parallel verarbeiten (max 3 gleichzeitig)…", len(ptr_items))
         with ThreadPoolExecutor(max_workers=3) as ex:
             futures = {ex.submit(_process_ptr, item): item for item in ptr_items}
             for fut in as_completed(futures):
                 try:
-                    new_count += fut.result()
+                    result = fut.result()
+                    if result:
+                        alertable.append(result)
                 except Exception as e:
                     log.warning("PTR Worker Fehler: %s", e)
+
+    # Alle alertbaren Filings dieses Laufs in einer Mail (Digest bei >1)
+    if alertable:
+        send_oge_alert(alertable)
+        new_count += len(alertable)
 
     conn.commit()
     if new_count == 0:
@@ -3644,6 +3922,44 @@ def record_outcomes():
     log.info("  ✅ Outcomes aktualisiert")
 
 
+def record_ptr_outcomes():
+    """
+    Backtest der Nachkauf-These: füllt price_7d/price_30d in ptr_outcomes nach.
+    Nach ein paar Monaten zeigt die Tabelle datenbasiert, ob 'Trump-Käufe trotz
+    Melde-Latenz nachkaufen' funktioniert — und für welche Kaufgröße.
+    """
+    try:
+        rows = conn.execute("""
+            SELECT ticker, pdf_url, alerted_at, price_7d, price_30d
+            FROM ptr_outcomes
+            WHERE (price_7d  IS NULL AND alerted_at < datetime('now', '-8 days'))
+               OR (price_30d IS NULL AND alerted_at < datetime('now', '-31 days'))
+            LIMIT 5
+        """).fetchall()
+    except sqlite3.OperationalError:
+        return  # Tabelle existiert erst nach dem ersten PTR-Alert
+    if not rows:
+        return
+    log.info("Backtesting: %d PTR-Outcomes zu aktualisieren …", len(rows))
+    for ticker, pdf_url, alerted_at, p7, p30 in rows:
+        data = fetch_market_data(ticker)
+        if not data:
+            continue
+        current = data["price"]
+        try:
+            age = (now_utc() - datetime.fromisoformat(alerted_at)).total_seconds()
+        except ValueError:
+            continue
+        if p7 is None and age > 8 * 86400:
+            p7 = current
+        if p30 is None and age > 31 * 86400:
+            p30 = current
+        conn.execute(
+            "UPDATE ptr_outcomes SET price_7d=?, price_30d=? "
+            "WHERE ticker=? AND pdf_url=?", (p7, p30, ticker, pdf_url))
+    conn.commit()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3814,6 +4130,7 @@ def main():
     if SRC_OGE:
         check_oge_alerts()
     record_outcomes()
+    record_ptr_outcomes()
 
     log.info(f"\n{'═'*62}")
     log.info(f"  ✅ Durchlauf beendet – {emails_sent} E-Mail(s) verschickt, {processed} analysiert")
