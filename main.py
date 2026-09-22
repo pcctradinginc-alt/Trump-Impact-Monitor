@@ -3921,7 +3921,7 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
     try:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=750,      # war 550/900 — +7 Turbo-Selector-Zeilen brauchen etwas mehr Platz
+            max_tokens=1200,     # Antwort inkl. Turbo-Selector-Zeilen ~750-900 Tokens (Selbsttest: 750 schnitt ab)
             # Sonnet 5: temperature/top_p werden mit 400 abgelehnt; Thinking ist
             # ohne Angabe standardmäßig AN und würde die 550 Tokens aufbrauchen.
             thinking={"type": "disabled"},
