@@ -4462,6 +4462,12 @@ def main():
             continue
         tickers = find_all_tickers(text)
         if not tickers:
+            text_hash = get_hash(text)
+            state_key = f"sector_seen:{text_hash}"
+            if not _state_get(state_key):
+                tickers = discover_tickers_via_claude(text)
+                _state_set(state_key, "done")
+        if not tickers:
             continue
         for ticker, confidence in _sorted_tickers(tickers):
             if _cap_reached():
@@ -4491,12 +4497,15 @@ def main():
             continue
         if not is_recent(doc.get("publishedAt")):
             continue
-        if not is_financially_relevant(text):
-            tickers = discover_tickers_via_claude(text)  # EOs haben oft keinen direkten Ticker
-        else:
-            tickers = find_all_tickers(text)
-            if not tickers:
+        # EOs haben oft keine Finanz-Schlagworte und keinen direkten Ticker →
+        # Sektor-Inferenz auch ohne is_financially_relevant, aber je Dokument
+        # nur einmal über alle Läufe (monitor_state-Guard).
+        tickers = find_all_tickers(text) if is_financially_relevant(text) else []
+        if not tickers:
+            state_key = f"sector_seen:{get_hash(text)}"
+            if not _state_get(state_key):
                 tickers = discover_tickers_via_claude(text)
+                _state_set(state_key, "done")
         if not tickers:
             continue
         for ticker, confidence in _sorted_tickers(tickers):
