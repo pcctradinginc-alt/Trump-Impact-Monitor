@@ -3768,6 +3768,21 @@ def discover_tickers_via_claude(text: str) -> list[tuple[str, str]]:
         log.warning(f"  ⚠️  Sektor-Erkennung Fehler: {e}")
         return []
 
+def _sector_tickers_once(text: str) -> list[tuple[str, str]]:
+    """Haiku-Sektor-Inferenz höchstens einmal pro Text über alle Läufe; das
+    Ergebnis wird in monitor_state gecacht. Bei 10-Minuten-Takt liegen dieselben
+    Artikel sonst ~18× im Zeitfenster und würden jedes Mal neu abgefragt.
+    Spätere Läufe bekommen die gecachten Ticker (z.B. nach Ablauf eines
+    Cooldowns); doppelte Analysen verhindert weiterhin already_seen()."""
+    state_key = f"sector_seen:{get_hash(text)}"
+    cached = _state_get(state_key)
+    if cached is not None:
+        # nur echte Symbole (ältere Einträge enthalten den Marker "done")
+        return [(t, "claude") for t in cached.split(",") if re.fullmatch(r"[A-Z]{1,5}", t)]
+    tickers = discover_tickers_via_claude(text)
+    _state_set(state_key, ",".join(t for t, _ in tickers))
+    return tickers
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HAUPTANALYSE  –  LLM + Alert + E-Mail
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4526,7 +4541,7 @@ def main():
         ts_relevant += 1
         tickers = find_all_tickers(text)
         if not tickers:
-            tickers = discover_tickers_via_claude(text)   # Sektor-Inferenz als Fallback
+            tickers = _sector_tickers_once(text)   # Sektor-Inferenz als Fallback
         if not tickers:
             continue
         ts_with_tickers += 1
@@ -4569,7 +4584,7 @@ def main():
         rss_relevant += 1
         tickers = find_all_tickers(text)
         if not tickers:
-            tickers = discover_tickers_via_claude(text)  # Fallback wie bei Truth Social
+            tickers = _sector_tickers_once(text)  # Fallback wie bei Truth Social
         if not tickers:
             continue
         rss_with_tickers += 1
@@ -4602,11 +4617,7 @@ def main():
             continue
         tickers = find_all_tickers(text)
         if not tickers:
-            text_hash = get_hash(text)
-            state_key = f"sector_seen:{text_hash}"
-            if not _state_get(state_key):
-                tickers = discover_tickers_via_claude(text)
-                _state_set(state_key, "done")
+            tickers = _sector_tickers_once(text)
         if not tickers:
             continue
         for ticker, confidence in _sorted_tickers(tickers):
@@ -4642,10 +4653,7 @@ def main():
         # nur einmal über alle Läufe (monitor_state-Guard).
         tickers = find_all_tickers(text) if is_financially_relevant(text) else []
         if not tickers:
-            state_key = f"sector_seen:{get_hash(text)}"
-            if not _state_get(state_key):
-                tickers = discover_tickers_via_claude(text)
-                _state_set(state_key, "done")
+            tickers = _sector_tickers_once(text)
         if not tickers:
             continue
         for ticker, confidence in _sorted_tickers(tickers):
