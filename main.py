@@ -26,8 +26,9 @@ from config import (
     MAX_ALERTS, LOOKBACK_HOURS, MIN_CONFIDENCE, MIN_MAGNITUDE,
     SRC_TRUTH, SRC_RSS, SRC_WHITEHOUSE,
     SRC_FEDREGISTER, SRC_EDGAR, SRC_OGE, SEND_NO_TRADE, INCLUDE_RETWEETS,
-    confidence_ok, magnitude_ok,
+    TURBO_SELECTOR_CFG, confidence_ok, magnitude_ok,
 )
+import turbo_selector  # "Trump Post → Turbo Selector DE" — siehe turbo_selector.py
 
 logging.basicConfig(
     level=logging.INFO,
@@ -422,6 +423,25 @@ def is_recent(ts) -> bool:
     except Exception as e:
         log.warning(f"  ⚠️  Zeitstempel nicht parsebar ({ts!r}): {e} → übersprungen")
         return False
+
+def _parse_post_time(published) -> datetime:
+    """Wie is_recent()'s Zeitstempel-Parsing, aber gibt ein tz-aware datetime
+    zurück (Default: jetzt) statt bool — für den Turbo-Selector, der den
+    Post-Zeitpunkt für die Markt-Reaktions-Bestätigung braucht."""
+    try:
+        if isinstance(published, datetime):
+            dt = published if published.tzinfo else published.replace(tzinfo=timezone.utc)
+        elif hasattr(published, "tm_year"):
+            dt = datetime(*published[:6], tzinfo=timezone.utc)
+        else:
+            raw = str(published).strip()
+            try:
+                dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                dt = parsedate_to_datetime(raw)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return now_utc()
 
 def get_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -3887,13 +3907,21 @@ SUMMARY: [Max 2 sentences. Facts only.]
 TRADE_DIRECTION: [LONG / SHORT / NO_TRADE]
 TRADE_RATIONALE: [Evidence + price {price:.2f} in one sentence]
 STOP_LEVEL: [LONG: {stop_long:.2f} (−8%) / SHORT: {stop_short:.2f} (+8%) / N/A]
-CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
+CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]
+HORIZON_DAYS: [3 / 5 / 7 / 10] — trading days over which EXPECTED_MOVE_PCT should play out
+EXPECTED_MOVE_PCT: [signed % move of {ticker} over HORIZON_DAYS, e.g. -3.5 or +6.0]
+SIGNAL_CONFIDENCE_PCT: [0-100] — numeric confidence in the direction+magnitude, independent of CONFIDENCE_SCORE
+UNCERTAINTY: [LOW / MEDIUM / HIGH] — how much this could go the other way
+MACRO_UNDERLYING: [DAX / SPX / NDX / EURUSD / GOLD / BRENT / WTI / NONE] — best broad underlying ALSO affected by this event, or NONE
+MACRO_DIRECTION: [LONG / SHORT / NEUTRAL] for MACRO_UNDERLYING (N/A if NONE)
+MACRO_EXPECTED_MOVE_PCT: [signed % move of MACRO_UNDERLYING over HORIZON_DAYS — indices/FX/commodities move far less than single stocks; N/A if NONE]
+RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the source text]"""
 
     # ── Stufe 2: Sonnet-Analyse mit Prompt Caching ────────────────────────────
     try:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=550,      # war 900 — Antworten sind ~350-500 Token
+            max_tokens=750,      # war 550/900 — +7 Turbo-Selector-Zeilen brauchen etwas mehr Platz
             # Sonnet 5: temperature/top_p werden mit 400 abgelehnt; Thinking ist
             # ohne Angabe standardmäßig AN und würde die 550 Tokens aufbrauchen.
             thinking={"type": "disabled"},
@@ -3932,6 +3960,15 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
     conf_score = "LOW"
     magnitude  = "SMALL"
     event_date_str = "UNKNOWN"
+    # ── Turbo-Selector-Felder (siehe erweiterter dynamic_prompt oben) ────────
+    horizon_days          = 5
+    expected_move_pct     = 0.0
+    signal_confidence_pct = 50.0
+    uncertainty           = "MEDIUM"
+    macro_underlying      = "NONE"
+    macro_direction       = "NEUTRAL"
+    macro_move_pct        = None
+    rationale_line        = ""
     for line in alert_text.splitlines():
         u = line.upper()
         if u.startswith("TRADE_DIRECTION:"):
@@ -3948,6 +3985,39 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
             else: magnitude = "SMALL"
         elif line.upper().startswith("EVENT_DATE:"):
             event_date_str = line.split(":", 1)[1].strip()
+        elif u.startswith("HORIZON_DAYS:"):
+            m = re.search(r'\d+', line)
+            if m and int(m.group(0)) in (3, 5, 7, 10):
+                horizon_days = int(m.group(0))
+        elif u.startswith("EXPECTED_MOVE_PCT:"):
+            m = re.search(r'-?\d+(\.\d+)?', line.split(":", 1)[1] if ":" in line else line)
+            if m:
+                expected_move_pct = float(m.group(0))
+        elif u.startswith("SIGNAL_CONFIDENCE_PCT:"):
+            m = re.search(r'\d+(\.\d+)?', line.split(":", 1)[1] if ":" in line else line)
+            if m:
+                signal_confidence_pct = float(m.group(0))
+        elif u.startswith("UNCERTAINTY:"):
+            if "HIGH" in u: uncertainty = "HIGH"
+            elif "MEDIUM" in u: uncertainty = "MEDIUM"
+            elif "LOW" in u: uncertainty = "LOW"
+        elif u.startswith("MACRO_UNDERLYING:"):
+            for key in turbo_selector.MACRO_UNDERLYINGS:
+                if key in u:
+                    macro_underlying = key
+                    break
+            else:
+                macro_underlying = "NONE"
+        elif u.startswith("MACRO_EXPECTED_MOVE_PCT:"):
+            m = re.search(r'-?\d+(\.\d+)?', line.split(":", 1)[1] if ":" in line else "")
+            if m:
+                macro_move_pct = float(m.group(0))
+        elif u.startswith("MACRO_DIRECTION:"):
+            if "LONG" in u: macro_direction = "LONG"
+            elif "SHORT" in u: macro_direction = "SHORT"
+            else: macro_direction = "NEUTRAL"
+        elif u.startswith("RATIONALE:"):
+            rationale_line = line.split(":", 1)[1].strip() if ":" in line else ""
 
     # ── Stale-Event-Gate: kein Trade wenn Event > 7 Tage alt ─────────────────
     if event_date_str and event_date_str.upper() != "UNKNOWN":
@@ -3974,8 +4044,62 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
         return
 
     # ── Turbo-Empfehlung ─────────────────────────────────────────────────────
-    turbo_dir   = "UNKLAR" if direction == "NO_TRADE" else direction
-    turbo_block = turbo_recommendation(ticker, turbo_dir)
+    # "Trump Post → Turbo Selector DE": Signal → Marktbestätigung → deutsche
+    # Turbo-Zertifikate → Risiko/Kosten → bestes Produkt oder NO TRADE.
+    # turbo_recommendation() (Parameter-Heuristik, kein Risiko-Scoring) bleibt
+    # NUR als Fallback falls der Selector eine Exception wirft.
+    turbo_dir        = "UNKLAR" if direction == "NO_TRADE" else direction
+    turbo_selector_decision = None
+    turbo_post_hash  = event_hash(ticker, raw_text)
+    try:
+        if turbo_dir not in ("LONG", "SHORT"):
+            raise ValueError("kein LONG/SHORT-Signal für den Turbo-Selector")
+        post_dt = _parse_post_time(published)
+        stock_signal = turbo_selector.MarketSignal(
+            underlying=ticker,
+            yf_symbol=turbo_selector.YF_TICKER_MAP.get(t_upper, t_upper),
+            direction=turbo_dir,
+            confidence=max(0.0, min(1.0, signal_confidence_pct / 100.0)),
+            expected_return=expected_move_pct / 100.0,
+            horizon_days=horizon_days,
+            rationale=rationale_line or alert_text.splitlines()[0][:160],
+            uncertainty=uncertainty,
+        )
+        sel_result = turbo_selector.select_turbo(
+            stock_signal, post_dt, conn=conn,
+            trump_post_id=url, post_text_hash=turbo_post_hash,
+        )
+        turbo_selector_decision = sel_result.decision
+        turbo_block = sel_result.text
+
+        if macro_underlying != "NONE" and macro_direction in ("LONG", "SHORT"):
+            macro_cfg = turbo_selector.MACRO_UNDERLYINGS.get(macro_underlying)
+            if macro_cfg:
+                macro_signal = turbo_selector.MarketSignal(
+                    underlying=macro_underlying, yf_symbol=macro_cfg["yf"],
+                    direction=macro_direction,
+                    confidence=max(0.0, min(1.0, signal_confidence_pct / 100.0)),
+                    # Eigene Makro-Bewegung; fehlt sie, konservativ 30 % der
+                    # Aktienbewegung (Indizes/FX/Rohstoffe bewegen sich deutlich weniger)
+                    expected_return=(abs(macro_move_pct) if macro_move_pct is not None
+                                     else abs(expected_move_pct) * 0.3)
+                                    / 100.0 * (1 if macro_direction == "LONG" else -1),
+                    horizon_days=horizon_days,
+                    rationale=rationale_line or "Makro-Ableitung aus Sonnet-Signal",
+                    uncertainty=uncertainty, is_macro=True, macro_label=macro_cfg["label"],
+                )
+                macro_result = turbo_selector.select_turbo(
+                    macro_signal, post_dt, conn=conn,
+                    trump_post_id=url, post_text_hash=turbo_post_hash + "-macro",
+                )
+                turbo_block += ("\n\n" + "═" * 50 +
+                               f"\nMAKRO-SIGNAL ZUSÄTZLICH BETROFFEN: {macro_cfg['label']}\n" +
+                               macro_result.text)
+    except Exception as e:
+        log.warning(f"  ⚠️  Turbo-Selector Fehler ({ticker}): {e} — Fallback auf turbo_recommendation()")
+        turbo_block = turbo_recommendation(ticker, turbo_dir)
+        turbo_selector_decision = None
+
     # URLs im Turbo-Block klickbar machen (Text bleibt sonst unverändert)
     turbo_html  = re.sub(
         r'(https?://[^\s<]+)',
@@ -3994,6 +4118,16 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
     except sqlite3.IntegrityError:
         log.info(f"  ⏭️  {ticker} bereits in DB – kein doppelter Alert")
         return
+
+    # ── Turbo-Selector NO-TRADE-Gate (nach Dedup-Eintrag → kein erneuter
+    # Sonnet-Call für denselben Post in späteren Läufen) (unabhängig vom generellen SEND_NO_TRADE-
+    # Gate weiter unten, das sich auf TRADE_DIRECTION bezieht — hier geht es
+    # um den Fall, dass Sonnet LONG/SHORT sagt, der Selector aber z.B. "bereits
+    # eingepreist" oder "kein Produkt mit positivem EV" befindet) ────────────
+    if turbo_selector_decision == "NO_TRADE" and not TURBO_SELECTOR_CFG.get("send_no_trade_alerts", True):
+        log.info(f"  ⏭️  {ticker} Turbo-Selector NO_TRADE → kein Alert "
+                "(config: turbo_selector.send_no_trade_alerts=false)")
+        return False
 
     # ── Konfidenz-Badge ──────────────────────────────────────────────────────
     if confidence == "niedrig":
@@ -4172,7 +4306,13 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
     dir_emoji = {"LONG": "📈", "SHORT": "📉"}.get(direction, "❓")
     conf_tag  = {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
     hold_tag  = " 💼" if holding_perf else ""  # Trump hält diese Aktie selbst
-    subject   = f"{dir_emoji} Trump-Impact – {ticker}{conf_tag}{hold_tag} [{direction}] – {source}"
+    # Turbo-Selector-Entscheidung sichtbar im Betreff, falls sie vom
+    # allgemeinen TRADE_DIRECTION-Ergebnis abweicht (z.B. LONG-Signal, aber
+    # Turbo-Selector sagt "bereits eingepreist" → NO TRADE)
+    turbo_tag = ""
+    if turbo_selector_decision == "NO_TRADE" and direction != "NO_TRADE":
+        turbo_tag = " · NO TRADE (Turbo)"
+    subject   = f"{dir_emoji} Trump-Impact – {ticker}{conf_tag}{hold_tag} [{direction}]{turbo_tag} – {source}"
     sent = send_gmail(subject, html_body)
     if sent:
         log.info(f"  🎯 Alert gesendet: {ticker} | {direction} | {source}")
