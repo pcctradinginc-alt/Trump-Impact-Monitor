@@ -7120,3 +7120,63 @@ alerts:
 
   # Retweets von Trump's eigenem Account alertieren?
   include_retweets: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TURBO SELECTOR  –  "Trump Post → Turbo Selector DE"
+# Analyse-only Pipeline: Signal → Marktbestätigung → deutsche Turbo-Zertifikate
+# → Risiko/Kosten → bestes Produkt oder NO TRADE. Siehe turbo_selector.py.
+# ─────────────────────────────────────────────────────────────────────────────
+turbo_selector:
+  # Erlaubte Horizonte (Handelstage) — muss zu HORIZON_DAYS im Sonnet-Prompt passen
+  horizons_days: [3, 5, 7, 10]
+
+  # ── Marktbestätigung ─────────────────────────────────────────────────────
+  # NO TRADE wenn die Reaktion seit Post-Zeitpunkt bereits >= dieser Anteil
+  # der erwarteten Bewegung in Signal-Richtung erreicht hat ("eingepreist")
+  priced_in_fraction: 0.70
+
+  # NO TRADE ("widersprüchlich") wenn der 20-Tage-Trend der Signal-Richtung um
+  # mehr als diesen Anteil entgegensteht UND auch der 5-Tage-Trend dagegen läuft
+  contradiction_threshold: 0.10
+  # NO TRADE wenn der Markt seit dem Post um >= diesen Anteil der erwarteten
+  # Bewegung GEGEN das Signal gelaufen ist
+  against_reaction_fraction: 0.5
+
+  # ── Harte Filter für Produktkandidaten ───────────────────────────────────
+  max_spread_pct: 3.0            # max. Geld/Brief-Spread in %
+  max_leverage: 20.0             # max. Hebel
+  min_ko_distance_pct: 3.0       # absoluter Mindestabstand KO↔Spot in %
+  min_ko_distance_vol_mult: 1.0  # zusätzlich: k * HV * sqrt(horizon/252)
+  freshness_minutes: 30          # max. Alter des Kurses während Handelszeiten
+  stale_relax_factor: 8          # Faktor für freshness_minutes außerhalb der Handelszeiten (Xetra-Fenster grob 07–21 UTC, Mo–Fr)
+
+  # ── Monte-Carlo-Parameter (P(KO), Rendite) ───────────────────────────────
+  n_paths: 4000
+  mc_seed: 42
+
+  # ── Finanzierungskosten (p.a.), vereinfachtes Modell ─────────────────────
+  financing_reference_rate: 0.035   # z.B. EURIBOR/SOFR-Proxy
+  financing_issuer_spread: 0.025    # typischer Emittenten-Aufschlag p.a.
+  short_financing_is_credit: false  # true = Short-Finanzierung wird als Gutschrift statt Kosten behandelt
+
+  # ── Konservative Rendite / Konfidenz-Shrinkage ───────────────────────────
+  uncertainty_shrink: {LOW: 1.0, MEDIUM: 0.7, HIGH: 0.4}
+  conservative_ci_percentile: 5      # unteres Perzentil der Basissimulation als zweite konservative Schranke
+
+  # ── Score-Gewichte (score = expected_net_return − KO_PENALTY*p_ko − ...) ─
+  # score_per_exposure: true → (EV − Spread − Finanzierung) / Hebel − Strafen,
+  # d.h. Effizienz je Einheit Basiswert-Exposure statt "höchster Hebel gewinnt".
+  # Gewichte sind auf diese Skala (Rendite pro Exposure, typ. wenige %) kalibriert.
+  score_per_exposure: true
+  ko_penalty: 0.10            # 10 % P(KO) kostet 1 %-Punkt Score
+  uncertainty_penalty: 0.005  # HIGH-Unsicherheit kostet 0,5 %-Punkte
+  spread_cost_weight: 1.0
+  financing_cost_weight: 1.0
+
+  # ── Entscheidung ──────────────────────────────────────────────────────────
+  actionable_confidence_min: 0.55   # SIGNAL_CONFIDENCE_PCT/100 ab dem ACTIONABLE statt WATCH möglich ist
+
+  # NO_TRADE-Turbo-Selector-Ergebnisse trotzdem per E-Mail senden (klar als
+  # NO TRADE markiert)? Unabhängig von alerts.send_no_trade (das gilt für die
+  # gesamte Alert-Direction, nicht speziell den Turbo-Selector-Teil).
+  send_no_trade_alerts: true

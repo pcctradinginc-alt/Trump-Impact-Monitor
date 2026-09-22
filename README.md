@@ -81,6 +81,7 @@ Bei neuen Alerts erscheint ein Commit `chore: update alerts.db`.
 | Datei | Zweck |
 |---|---|
 | `main.py` | Kernlogik: fetch → Entity-Resolution → LLM → E-Mail |
+| `turbo_selector.py` | "Trump Post → Turbo Selector DE": Signal → Marktbestätigung → Produktsuche → Risiko/Score → ACTIONABLE/WATCH/NO_TRADE |
 | `config.yml` | Watchlist, Schwellenwerte, Quellen an/aus – ohne Code-Änderung anpassbar |
 | `config.py` | Lädt config.yml als typisierte Konstanten |
 | `entities.json` | Ticker → Keyword-Mappings (~7 000 Symbole, frei erweiterbar) |
@@ -110,10 +111,8 @@ Alle 10 Minuten (nur kostenlose Quellen):
   + Trump-Interessenkonflikt inkl. Performance seit Trump-Kauf
          │
          ▼
-  Turbo-Zertifikat: konkretes, in DE handelbares Papier (WKN/ISIN)
-  via Vontobel-Produkt-API — Hebel ≈ 1/KO-Abstand nach Risikoprofil,
-  Spread-Check ≤ 0.8 %, Preis 4–25 €, KO-Plausibilität geprüft;
-  Fallback: Finder-Links mit manuellen Filterwerten
+  Turbo Selector DE (turbo_selector.py) — siehe eigener Abschnitt unten;
+  Fallback bei Fehlern: alte Parameter-Heuristik (turbo_recommendation)
          │
          ▼
   Gmail-Alert (HTML) · SQLite-Dedup · 4h-Ticker-Cooldown · Tages-Cap
@@ -137,6 +136,89 @@ Alle 10 Minuten (nur kostenlose Quellen):
 | Gmail | 0 € (App-Passwort) |
 | GitHub Actions | 0 € bei Public; bei Private ~2–3 min/Lauf → passt in die freien 2 000 min/Monat |
 | ScrapeCreators | Optional, nur als letzter Truth-Social-Fallback |
+
+---
+
+## 🎯 Turbo Selector DE ("Trump Post → Turbo Selector DE")
+
+`turbo_selector.py` ersetzt die alte Parameter-Heuristik durch eine
+analysebasierte Pipeline, die für jedes Sonnet-Signal höchstens EIN
+Turbo-Zertifikat empfiehlt oder explizit **NO TRADE** sagt. Reine
+Analyse — keine Order-Ausführung, keine Broker-Anbindung.
+
+```
+Trump-Post
+   │  (Sonnet liefert zusätzlich zum bisherigen Format:
+   │   HORIZON_DAYS, EXPECTED_MOVE_PCT, SIGNAL_CONFIDENCE_PCT,
+   │   UNCERTAINTY, MACRO_UNDERLYING/-DIRECTION, RATIONALE)
+   ▼
+MarketSignal (Aktie, optional zusätzlich ein Makro-Signal:
+   DAX/S&P 500/Nasdaq 100/EUR-USD/Gold/Brent/WTI)
+   ▼
+Marktbestätigung — NO TRADE wenn:
+   • bereits eingepreist (Reaktion seit Post ≥ 70 % der erwarteten Bewegung)
+   • widersprüchlich: Markt seit Post ≥ 50 % der erwarteten Bewegung GEGEN das
+     Signal gelaufen, oder 20-Tage-Gegentrend > 10 % und auch 5 Tage noch dagegen
+   ▼
+Produktsuche: onvista Derivate-Finder (aggregiert SG, Goldman, JPM, BNP,
+HSBC, Morgan Stanley, UBS, UniCredit, Vontobel, … hinter einem Endpunkt),
+serverseitig Open End + je Hebel-Band (2–4 … 16–20) abgefragt
++ Vontobel-eigene API als zusätzliche Emittenten-Quelle
+   ▼
+Harte Filter: echte Zweiwege-Quote (0 < Bid < Ask), Spread ≤ Limit, KO auf der richtigen Seite
+und weit genug weg (Vol-abhängig), Hebel ≤ Limit, Kurs frisch genug
+   ▼
+Je Kandidat: Monte-Carlo (Bootstrap der Tages-Log-Renditen aus ~1 Jahr
+Historie, Signal-Drift aufgesetzt) + Brownsche-Brücke-Korrektur für
+Intraday-KO-Berührungen → P(KO), Expected Net Return, konservative
+Rendite (Signal-Drift um Konfidenz × Unsicherheit geschrumpft)
+   ▼
+Score = (Expected Net Return − Spread-Kosten − Finanzierungskosten) / Hebel
+        − KO_PENALTY·P(KO) − UNCERTAINTY_PENALTY·Unsicherheit
+   = Effizienz je Einheit Basiswert-Exposure (score_per_exposure: true), damit
+     nicht automatisch der höchste Hebel gewinnt. Empfohlen werden nur Produkte
+     mit konservativer Rendite > 0 (erst filtern, dann ranken).
+   ▼
+Bestes Produkt (+ Median der Vergleichbaren, beste Alternative eines
+anderen Emittenten) → ACTIONABLE / WATCH / NO_TRADE, deutscher HTML-Block
+in der bestehenden Alert-Mail; Persistenz in SQLite-Tabelle
+`turbo_selections` (main.py legt sie wie die anderen Tabellen per
+CREATE TABLE IF NOT EXISTS an).
+```
+
+**Wichtige config.yml-Schlüssel (Abschnitt `turbo_selector:`):**
+
+| Schlüssel | Bedeutung |
+|---|---|
+| `horizons_days` | erlaubte Horizonte, muss zu Sonnets `HORIZON_DAYS` passen |
+| `priced_in_fraction` | Schwelle für "bereits eingepreist" |
+| `contradiction_threshold`, `against_reaction_fraction` | Schwellen für "Signal widersprüchlich" (Gegentrend / Gegenreaktion seit Post) |
+| `max_spread_pct`, `max_leverage`, `min_ko_distance_pct`, `min_ko_distance_vol_mult` | harte Produktfilter |
+| `freshness_minutes`, `stale_relax_factor` | Kursfrische während/außerhalb der Handelszeit (grobe Xetra-Heuristik Mo–Fr 07–21 UTC) |
+| `n_paths`, `mc_seed` | Monte-Carlo-Parameter |
+| `financing_reference_rate`, `financing_issuer_spread`, `short_financing_is_credit` | vereinfachtes Finanzierungskosten-Modell |
+| `uncertainty_shrink`, `conservative_ci_percentile` | Konfidenz-Schrumpfung für die konservative Rendite |
+| `score_per_exposure`, `ko_penalty`, `uncertainty_penalty`, `spread_cost_weight`, `financing_cost_weight` | Score-Formel und -Gewichte |
+| `actionable_confidence_min` | ab welcher Konfidenz ACTIONABLE statt WATCH möglich ist |
+| `send_no_trade_alerts` | ob NO-TRADE-Ergebnisse des Selectors trotzdem gemailt werden (klar markiert) |
+
+**Bekannte Grenzen (bewusste Vereinfachungen, dokumentiert im Code):**
+- Vontobels kostenlose API liefert keinen Ask-Preis → deren Kandidaten
+  fallen praktisch immer durch den `ask > 0`-Filter; onvista bleibt die
+  einzig wirklich nutzbare Quelle (aggregiert aber bereits 7+ Emittenten).
+- Börse Stuttgart/Frankfurt: kein workables kostenloses Keyless-JSON
+  gefunden (403/405 auf einfache GET-Requests) — nicht integriert.
+- FX-Effekt (USD-Basiswert, EUR-Produkt) wird nur als unabhängiger
+  Bootstrap-Overlay auf EUR/USD angenähert, nicht gemeinsam simuliert.
+- Die konservative Rendite nutzt NUR die konfidenz-/unsicherheits-
+  geschrumpfte Simulation, nicht zusätzlich das 5 %-Quantil der
+  Basissimulation als hartes Gate — bei den üblichen 5–15×-Hebeln ist
+  dieses Quantil strukturell fast immer nahe −100 % und hätte jede
+  Empfehlung verhindert. Es wird trotzdem berechnet und als Risikohinweis
+  ausgegeben ("Ungünstiges Szenario (5%-Quantil)").
+- Finanzierungskosten sind ein grobes p.a.-Modell (Referenzzins +
+  Emittenten-Aufschlag, linear auf den Horizont skaliert), keine
+  produktgenaue Nachbildung des tatsächlich drifting KO/Strike-Levels.
 
 ---
 

@@ -36,7 +36,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Files main.py needs at import time (config.py reads config.yml directly;
 # entities.json is loaded relative to main.py's own directory).
-_FILES_NEEDED = ["main.py", "config.py", "config.yml", "entities.json"]
+_FILES_NEEDED = ["main.py", "config.py", "config.yml", "entities.json", "turbo_selector.py"]
 
 
 def _import_main_in_scratch_copy():

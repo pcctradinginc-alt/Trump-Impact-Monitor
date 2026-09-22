@@ -31,6 +31,10 @@ SRC_OGE          = _CFG["sources"]["oge_monitor"]
 SEND_NO_TRADE    = _CFG["alerts"]["send_no_trade"]
 INCLUDE_RETWEETS = _CFG["alerts"]["include_retweets"]
 
+# Turbo Selector ("Trump Post → Turbo Selector DE") — komplette Sub-Config
+# wird 1:1 durchgereicht, siehe turbo_selector.py für die Verwendung.
+TURBO_SELECTOR_CFG = _CFG.get("turbo_selector", {})
+
 # Konfidenz-Ranking (für Schwellenwert-Vergleich)
 _CONF_RANK  = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
 _MAG_RANK   = {"SMALL": 0, "MEDIUM": 1, "LARGE": 2}
