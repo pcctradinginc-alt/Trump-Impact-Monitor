@@ -3742,7 +3742,9 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
         response = client.messages.create(
             model=MODEL,
             max_tokens=550,      # war 900 — Antworten sind ~350-500 Token
-            temperature=0,
+            # Sonnet 5: temperature/top_p werden mit 400 abgelehnt; Thinking ist
+            # ohne Angabe standardmäßig AN und würde die 550 Tokens aufbrauchen.
+            thinking={"type": "disabled"},
             messages=[{
                 "role": "user",
                 "content": [
@@ -3758,10 +3760,13 @@ CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]"""
                 ],
             }],
         )
-        alert_text = response.content[0].text.strip()
+        alert_text = next((b.text for b in response.content if b.type == "text"), "").strip()
         _rate_limit_record(ticker)   # Sonnet-Call zählen + Cooldown setzen
     except Exception as e:
         log.error(f"  ❌ Claude-API Fehler ({ticker}): {e}")
+        return
+    if not alert_text:
+        log.error(f"  ❌ Claude-API ({ticker}): leere Antwort (stop_reason={response.stop_reason})")
         return
 
     # ── Relevanz-Gate ────────────────────────────────────────────────────────
