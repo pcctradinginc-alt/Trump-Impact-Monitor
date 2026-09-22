@@ -2,7 +2,10 @@ name: Trump Impact Monitor
 
 on:
   schedule:
-    - cron: '0 * * * *'       # stündlich
+    # Alle 10 min, bewusst NICHT zur vollen Stunde: GitHub verzögert/verwirft
+    # :00-Schedules unter Last (beobachtet: Lücken von 2–5 h). Repo ist public
+    # → Actions-Minuten kostenlos. Dedup verhindert Doppel-Mails trotz Überlappung.
+    - cron: '7-59/10 * * * *'
     - cron: '25 13 * * 1-5'   # 09:25 ET (5 min vor NYSE-Öffnung, Mo-Fr) + OGE-Tageslauf
     - cron: '55 20 * * 1-5'   # 16:55 ET (5 min vor NYSE-Schluss, Mo-Fr)
   workflow_dispatch:          # manueller Start via GitHub UI

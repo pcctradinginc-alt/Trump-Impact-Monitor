@@ -10,6 +10,7 @@ import html
 import feedparser
 import requests
 import yfinance as yf
+from curl_cffi import requests as cffi_requests
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from anthropic import Anthropic
@@ -59,7 +60,7 @@ TRUMP_TRUTH_ID       = "107780257626128497"
 DB_PATH              = "alerts.db"
 MAX_ALERTS_PER_RUN   = MAX_ALERTS  # aus config.yml
 MAX_TICKERS_PER_ART  = 3
-MODEL                = "claude-sonnet-4-6"
+MODEL                = "claude-sonnet-5"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECRETS-VALIDIERUNG
@@ -152,6 +153,12 @@ conn.execute("""
         tx_date     TEXT,
         pdf_url     TEXT,
         created_at  TEXT
+    )
+""")
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS run_state (
+        id           INTEGER PRIMARY KEY CHECK (id = 1),
+        last_run_ts  TEXT
     )
 """)
 conn.commit()
@@ -351,6 +358,50 @@ def now_utc() -> datetime:
 
 CUTOFF: datetime  # set in main() at runtime
 
+# GitHub Actions cron ist unzuverlässig: der ':00'-nahe 10-Minuten-Schedule
+# wird unter Last regelmäßig um 2-6h verzögert oder ganz übersprungen (siehe
+# Kommentar in .github/workflows/trump-monitor.yml). Ein starres LOOKBACK_HOURS
+# reißt dann Lücken: Posts die während so einer Pause veröffentlicht wurden
+# fallen aus dem Zeitfenster bevor der nächste Lauf sie sieht → "0 analysiert"
+# obwohl der Feed neue, relevante Posts enthielt. Fix: CUTOFF nie enger als
+# der letzte tatsächlich abgeschlossene Lauf, mit Obergrenze gegen Daten-Flut
+# nach langer Downtime.
+MAX_LOOKBACK_HOURS = 24
+
+def get_last_run_ts() -> datetime | None:
+    row = conn.execute("SELECT last_run_ts FROM run_state WHERE id = 1").fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        dt = datetime.fromisoformat(row[0])
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+def save_last_run_ts(ts: datetime) -> None:
+    conn.execute(
+        "INSERT INTO run_state (id, last_run_ts) VALUES (1, ?) "
+        "ON CONFLICT(id) DO UPDATE SET last_run_ts = excluded.last_run_ts",
+        (ts.isoformat(),),
+    )
+    conn.commit()
+
+def compute_cutoff(now: datetime) -> datetime:
+    """
+    Untergrenze: LOOKBACK_HOURS (Normalfall bei zuverlässigem Schedule).
+    Erweitert sich rückwirkend bis zum letzten abgeschlossenen Lauf, falls der
+    Schedule eine größere Lücke gerissen hat — gedeckelt durch MAX_LOOKBACK_HOURS.
+    Dedup über already_seen()/event_hash() verhindert doppelte E-Mails, auch
+    wenn sich Zeitfenster zwischen Läufen überlappen.
+    """
+    default_cutoff = now - timedelta(hours=LOOKBACK_HOURS)
+    max_cutoff      = now - timedelta(hours=MAX_LOOKBACK_HOURS)
+    last_run = get_last_run_ts()
+    if last_run is None:
+        return default_cutoff
+    cutoff = min(default_cutoff, last_run)
+    return max(cutoff, max_cutoff)
+
 def is_recent(ts) -> bool:
     if ts is None:
         return False
@@ -443,12 +494,64 @@ _AMBIGUOUS_SYMBOLS = {
     "SELF", "SHE", "THE", "TOO", "WANT", "WAR", "WILL", "WOW",
 }
 
+# Länder-/Organisations-/Regierungs-Kürzel, die als Tier-1-Symbole in
+# entities.json existieren (z.B. WTO = "Utime Inc.", CMS = "CMS Energy"),
+# in der Praxis aber fast immer die politische/behördliche Bedeutung tragen
+# ("WTO ruling", "CMS rule on Medicare"). Bare Match (kein '$', keine
+# Exchange-Klammer) zählt hier nie — nur echte Ticker-Kennzeichnung zählt.
+# Live-Smoke-Test (2026-09-22, News-RSS) lieferte u.a. WTO, UK, AI, ACA, CMS,
+# NYC, API, JD, SF, CD, SA, SI, VS, GLP, LNG, MS als False Positives — die
+# meisten davon sind 2-Buchstaben-Kürzel (siehe Längen-Check unten), der Rest
+# steht hier explizit.
+_ACRONYM_STOPLIST = {
+    "WTO", "ACA", "CMS", "NYC", "API", "GLP", "LNG", "USA", "IRS", "DC",
+    "GOP", "MAGA", "GDP", "CEO", "FBI", "DOJ", "NATO", "SEC", "FDA", "EPA",
+    "DOD", "UN", "EU", "UK",
+}
+
 def _is_mostly_uppercase(text: str) -> bool:
     """True wenn >70% der Buchstaben Großbuchstaben sind (typischer Trump-Post)."""
     letters = [c for c in text if c.isalpha()]
     if len(letters) < 20:
         return False
     return sum(1 for c in letters if c.isupper()) / len(letters) > 0.70
+
+def _has_exchange_context(text: str, symbol: str) -> bool:
+    """
+    True wenn das Symbol explizit mit Börsenkürzel gekennzeichnet ist, z.B.
+    "(NASDAQ: HUBG)" oder "(NYSE: BA)". Zählt wie ein '$'-Präfix als
+    eindeutiger Ticker-Beleg. WICHTIG: die Exchange-Kennung (NASDAQ/NYSE/...)
+    muss vorhanden sein — ein bloßes "(ACA)" oder "(CMS)" ist im Fließtext
+    fast immer die ausgeschriebene Abkürzung eines Gesetzes/einer Behörde
+    ("Affordable Care Act (ACA)", "... Services (CMS)"), kein Ticker-Beleg.
+    """
+    return re.search(
+        r'\(\s*(?:NASDAQ|NYSE|NYSEAMERICAN|OTC|OTCMKTS)\s*:\s*'
+        + re.escape(symbol) + r'\s*\)',
+        text,
+    ) is not None
+
+# Generische Einzelwort-Aliases: entities.json ordnet manchen Small-Cap-
+# Tickern nur ein einziges, sehr allgemeines "company"-Wort zu (z.B. HOMB →
+# "Home", CHCO → "City", AFGB/C/D/E → "American", IBOC → "International",
+# NTIC → "Northern", JYNT → "Joint", STRC/D/F/K → "Strategy", TWI → "Titan").
+# Das matcht case-insensitiv praktisch jeden Nachrichtentext und erzeugt
+# Phantom-Ticker. Der bestehende Längen-Filter (<4 Zeichen) fängt das nicht ab,
+# da diese Wörter alle ≥4 Zeichen lang sind — deshalb zusätzliche Stopliste.
+_GENERIC_ALIAS_STOPWORDS = {
+    "home", "city", "state", "national", "international", "american",
+    "united", "global", "western", "eastern", "southern", "northern",
+    "central", "federal", "general", "metro", "metropolitan", "capital",
+    "first", "premier", "summit", "pacific", "atlantic", "union", "liberty",
+    "freedom", "patriot", "beacon", "joint", "group", "holdings",
+    "industries", "corp", "company", "enterprises", "partners", "trust",
+    "financial", "bank", "energy", "resources", "systems", "solutions",
+    "services", "technologies", "ventures", "strategy", "titan", "titans",
+    "nasdaq", "advance",
+}
+
+def _is_generic_alias(alias: str) -> bool:
+    return alias.strip().lower() in _GENERIC_ALIAS_STOPWORDS
 
 def find_all_tickers(text: str) -> list[tuple[str, str]]:
     """
@@ -462,15 +565,27 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
     all_caps:    bool                  = _is_mostly_uppercase(text)
 
     # Tier 1 — kombinierter Regex: O(text_length), deckt alle ~7000 Symbole ab
-    # Schutz vor Phantom-Tickern: mehrdeutige Symbole (englische Wörter) und
-    # ALL-CAPS-Posts brauchen ein $-Präfix, sonst zählt nur Tier 2 (Firmenname).
+    # Schutz vor Phantom-Tickern: ein bare Match (kein '$', keine Exchange-
+    # Klammer) zählt nur, wenn das Symbol "bekannt" ist — priority_high aus
+    # config.yml (kuratierte Kernliste) ODER mindestens 3 Zeichen lang UND
+    # nicht in der Kürzel-/Wörter-Stopliste. Reine 2-Buchstaben-Symbole
+    # (AI, MS, JD, TV, SF, UK, CD, SA, SI, VS, DC, …) sind so gut wie immer
+    # Initialen, Bundesstaaten oder Abkürzungen, keine Ticker-Erwähnungen —
+    # sie brauchen ein '$'-Präfix oder Exchange-Kontext. ALL-CAPS-Posts
+    # brauchen weiterhin immer ein '$'-Präfix (Trump-Truth-Social-Fall).
     for m in _TIER1_REGEX.finditer(text):
         t = m.group(1).upper()
         if t in seen:
             continue
         has_dollar_prefix = m.start() > 0 and text[m.start() - 1] == "$"
-        if not has_dollar_prefix and (t in _AMBIGUOUS_SYMBOLS or all_caps):
-            continue
+        has_ticker_marker = has_dollar_prefix or _has_exchange_context(text, t)
+        if not has_ticker_marker:
+            if all_caps:
+                continue
+            if t in _AMBIGUOUS_SYMBOLS or t in _ACRONYM_STOPLIST:
+                continue
+            if t not in WATCHLIST_HIGH and len(t) < 3:
+                continue
         results.append((t, "hoch"))
         seen.add(t)
 
@@ -480,7 +595,8 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
 
     # Tier 2 — Firmenname/CEO (nur Ticker mit nicht-leeren company-Aliases)
     # Aliases < 4 Zeichen ohne Ziffer/& (auto-generierter Junk wie 'Api', 'Fb')
-    # werden ignoriert — sie matchen case-insensitiv praktisch jeden Text.
+    # und generische Einzelwörter (siehe _GENERIC_ALIAS_STOPWORDS) werden
+    # ignoriert — sie matchen case-insensitiv praktisch jeden Text.
     # '3M', 'P&G', 'S&T' bleiben erlaubt; reine Kürzel matchen weiter via Tier 1.
     for ticker, tiers in ENTITIES.items():
         t = ticker.upper()
@@ -488,6 +604,8 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
             continue
         for alias in tiers["company"]:
             if len(alias) < 4 and not re.search(r'[\d&]', alias):
+                continue
+            if _is_generic_alias(alias):
                 continue
             if re.search(r'\b' + re.escape(alias) + r'\b', normalized, re.IGNORECASE):
                 results.append((t, "hoch"))
@@ -501,7 +619,7 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
             if t in seen or not tiers.get("weak"):
                 continue
             for alias in tiers["weak"]:
-                if len(alias) >= 5 and re.search(
+                if len(alias) >= 5 and not _is_generic_alias(alias) and re.search(
                     r'\b' + re.escape(alias) + r'\b', text, re.IGNORECASE
                 ):
                     results.append((t, "niedrig"))
@@ -1193,12 +1311,15 @@ FINANCIAL_RSS_FEEDS = [
     ("MarketWatch",         "https://feeds.marketwatch.com/marketwatch/topstories/"),
     ("Yahoo Finance",       "https://finance.yahoo.com/rss/topstories"),
     ("Seeking Alpha",       "https://seekingalpha.com/market_currents.xml"),
-    ("WSJ Markets",         "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"),
+    ("WSJ Markets",         "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain"),
     # Trump-spezifische Google News Feeds
     ("Google News Trump",         "https://news.google.com/rss/search?q=trump+tariff+trade&hl=en-US&gl=US&ceid=US:en"),
     ("Google News Trump Markets", "https://news.google.com/rss/search?q=trump+stock+market+executive+order&hl=en-US&gl=US&ceid=US:en"),
     ("Google News Trump Economy", "https://news.google.com/rss/search?q=trump+economy+sanctions+deal&hl=en-US&gl=US&ceid=US:en"),
-    ("Politico Economy",          "https://rss.politico.com/economy.xml"),
+    ("CNBC Politics",             "https://www.cnbc.com/id/10000113/device/rss/rss.html"),
+    ("The Hill Administration",   "https://thehill.com/homenews/administration/feed/"),
+    ("Investing.com Stocks",      "https://www.investing.com/rss/news_25.rss"),
+    ("Google News Truth Social",  "https://news.google.com/rss/search?q=%22Truth+Social%22+Trump+when:1d&hl=en-US&gl=US&ceid=US:en"),
 ]
 
 def _rss_to_dict(entry, source: str) -> dict:
@@ -1224,10 +1345,13 @@ def fetch_financial_rss() -> list[dict]:
 
 # whitehouse.gov/feed/ liefert seit dem Website-Relaunch 404 — diese drei
 # Unterfeeds funktionieren und decken News, Executive Orders und Statements ab.
+# Zusätzlich: USTR press releases + White House YouTube channel
 WHITEHOUSE_FEEDS = [
     "https://www.whitehouse.gov/news/feed/",
     "https://www.whitehouse.gov/presidential-actions/feed/",
     "https://www.whitehouse.gov/briefings-statements/feed/",
+    "https://ustr.gov/rss.xml",
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UCYxRlFDqcWM4y7FfpiAN3KQ",
 ]
 
 def fetch_whitehouse() -> list:
@@ -1245,7 +1369,7 @@ def fetch_whitehouse() -> list:
                 entries.append(e)
         except Exception as e:
             log.warning(f"  ⚠️  White House RSS Fehler ({url}): {e}")
-    log.info(f"  White House RSS: {len(entries)} Einträge (3 Feeds, dedupliziert)")
+    log.info(f"  White House RSS: {len(entries)} Einträge (5 Feeds, dedupliziert)")
     return entries
 
 
@@ -2962,9 +3086,77 @@ _YF_MIN_INTERVAL = 3.0  # Sekunden zwischen yfinance-Calls (Rate-Limit-Schutz)
 
 _YF_CACHE: dict[str, dict] = {}  # nur Erfolge werden gecacht
 
+# yfinance läuft in GitHub-Actions-Runnern (geteilte IP-Ranges) regelmäßig in
+# "429 Too Many Requests". Retrying auf demselben Endpunkt macht es nur
+# schlimmer (hämmert Yahoo weiter). Deshalb: bei Rate-Limit SOFORT auf den
+# rohen Yahoo-Chart-JSON-Endpunkt (query1/query2.finance.yahoo.com) via
+# curl_cffi (Chrome-Impersonation, bereits Dependency) ausweichen statt
+# erneut über yfinance zu retryen.
+YAHOO_CHART_HOSTS = ("query1.finance.yahoo.com", "query2.finance.yahoo.com")
+
+def _is_rate_limited(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "429" in msg or "too many requests" in msg
+
+def _closes_to_result(closes: list) -> dict:
+    closes = [c for c in closes if c is not None]
+    if len(closes) < 2:
+        return {}
+    current    = round(float(closes[-1]), 2)
+    prev_close = round(float(closes[-2]), 2)
+    week_ago   = round(float(closes[-6]) if len(closes) >= 6 else float(closes[0]), 2)
+    month_ago  = round(float(closes[0]), 2)
+    return {
+        "price":  current,
+        "chg_1d": round((current / prev_close - 1) * 100, 2),
+        "chg_1w": round((current / week_ago   - 1) * 100, 2),
+        "chg_1m": round((current / month_ago  - 1) * 100, 2),
+    }
+
+def _fetch_yahoo_chart_fallback(yf_sym: str) -> dict:
+    """
+    Kostenloser Fallback ohne yfinance: Yahoo-Chart-JSON-API direkt, mit
+    curl_cffi Chrome-Impersonation (umgeht das ansonsten 429-anfällige
+    urllib3/requests-Fingerprint von yfinance). Kein API-Key nötig.
+    """
+    for host in YAHOO_CHART_HOSTS:
+        try:
+            r = cffi_requests.get(
+                f"https://{host}/v8/finance/chart/{yf_sym}",
+                params={"interval": "1d", "range": "1mo"},
+                impersonate="chrome", timeout=15,
+            )
+            if r.status_code == 429:
+                log.warning(f"  ⚠️  Yahoo Chart-API ({host}): 429 – überspringe Fallback")
+                continue
+            r.raise_for_status()
+            result_list = r.json().get("chart", {}).get("result") or []
+            if not result_list:
+                continue
+            quote = result_list[0].get("indicators", {}).get("quote", [{}])[0]
+            closes = quote.get("close") or []
+            data = _closes_to_result(closes)
+            if data:
+                return data
+        except Exception as e:
+            log.warning(f"  ⚠️  Yahoo Chart-API ({host}) Fallback fehlgeschlagen: {e}")
+    return {}
+
+FETCH_MARKET_DATA_WAS_RATE_LIMITED = False  # von record_outcomes gelesen, um
+                                             # nach dem ersten 429 den Rest
+                                             # der Backtest-Runde zu überspringen
+
 def fetch_market_data(ticker: str) -> dict:
-    """Holt 1-Monats-History von Yahoo Finance. Bei Fehler leeres Dict."""
-    global _YF_LAST_CALL
+    """
+    Holt 1-Monats-History von Yahoo Finance. Bei Fehler leeres Dict.
+    Reihenfolge: yfinance (1 Versuch, kein Retry bei 429) → curl_cffi-
+    Chart-JSON-Fallback. Erst wenn beides fehlschlägt, wird aufgegeben.
+    Setzt FETCH_MARKET_DATA_WAS_RATE_LIMITED, wenn yfinance mit 429
+    geantwortet hat — Aufrufer wie record_outcomes können das nutzen, um bei
+    IP-weitem Rate-Limit nicht noch mehr Ticker gegen dieselbe Sperre zu werfen.
+    """
+    global _YF_LAST_CALL, FETCH_MARKET_DATA_WAS_RATE_LIMITED
+    FETCH_MARKET_DATA_WAS_RATE_LIMITED = False
     t_upper = ticker.upper()
     if t_upper in _YF_CACHE:
         return _YF_CACHE[t_upper]
@@ -2975,29 +3167,36 @@ def fetch_market_data(ticker: str) -> dict:
     _YF_LAST_CALL = time.time()
 
     yf_sym = YF_TICKER_MAP.get(t_upper, t_upper)
-    for attempt in range(3):
+    rate_limited = False
+    # Max. 2 Versuche über yfinance — bei 429 sofort abbrechen (kein
+    # Exponential-Backoff-Retry gegen denselben rate-limitenden Endpunkt).
+    for attempt in range(2):
         try:
             hist = yf.Ticker(yf_sym).history(period="1mo", auto_adjust=True,
                                               timeout=15)
             if hist.empty or len(hist) < 2:
-                return {}
-            close      = hist["Close"]
-            current    = round(float(close.iloc[-1]), 2)
-            prev_close = round(float(close.iloc[-2]), 2)
-            week_ago   = round(float(close.iloc[-6]) if len(close) >= 6 else float(close.iloc[0]), 2)
-            month_ago  = round(float(close.iloc[0]), 2)
-            result = {
-                "price":   current,
-                "chg_1d":  round((current / prev_close - 1) * 100, 2),
-                "chg_1w":  round((current / week_ago   - 1) * 100, 2),
-                "chg_1m":  round((current / month_ago  - 1) * 100, 2),
-            }
-            _YF_CACHE[t_upper] = result  # nur Erfolge cachen
-            return result
+                break
+            close  = hist["Close"].tolist()
+            result = _closes_to_result(close)
+            if result:
+                _YF_CACHE[t_upper] = result  # nur Erfolge cachen
+                return result
+            break
         except Exception as e:
             log.warning(f"  ⚠️  Yahoo Finance ({ticker}) attempt {attempt+1}: {e}")
-            if attempt < 2:
-                time.sleep(2 ** attempt)
+            if _is_rate_limited(e):
+                rate_limited = True
+                FETCH_MARKET_DATA_WAS_RATE_LIMITED = True
+                break  # nicht erneut gegen denselben Endpunkt retryen
+            if attempt == 0:
+                time.sleep(1)
+
+    if rate_limited:
+        log.info(f"  ℹ️  {ticker}: yfinance rate-limited → curl_cffi Chart-Fallback")
+    result = _fetch_yahoo_chart_fallback(yf_sym)
+    if result:
+        _YF_CACHE[t_upper] = result
+        return result
     return {}
 
 def format_market_block(ticker: str) -> str:
@@ -3078,8 +3277,13 @@ def _onvista_underlying_url(ticker: str) -> str | None:
 # VONTOBEL PRODUKT-API  –  konkretes, in DE handelbares Turbo-Zertifikat (WKN)
 # Öffentliche JSON-API des Emittenten-Finders, kostenlos, kein Key.
 # Verifiziert: culture via Query-Param "c=de-de"; Range-Filter via
-# "selectedItem", Listen-Filter via "selectedItems"; der Richtungsfilter
-# (property 4) wird von der API ignoriert → Richtung client-seitig filtern.
+# "selectedItem", Listen-Filter via "selectedItems". Der Richtungsfilter
+# (property 4) braucht "selectedItem": {"key": N} (SINGULAR) statt der
+# Listen-Form "selectedItems": [{"key": N}] — mit der Listen-Form ignoriert
+# die API den Filter komplett und liefert nur Longs zurück (TSLA z.B. 681
+# Long- vs. 132 Short-Papiere, Longs füllen dann jede Page). Zusätzlich
+# client-seitig gegenprüfen (KO vs. Spot) als Schutz falls sich das API-
+# Verhalten wieder ändert.
 # productType 5 = Open End Turbo · property 1 = Basiswert · 14 = Hebel · 58 = Preis €
 # ─────────────────────────────────────────────────────────────────────────────
 VONTOBEL_API  = "https://markets.vontobel.com/api/v1"
@@ -3122,10 +3326,12 @@ def find_best_turbo(ticker: str, direction: str,
                     hebel_lo: float, hebel_hi: float, hebel_target: float):
     """
     Sucht das beste in Deutschland handelbare Open-End-Turbo-Zertifikat:
-    - Server-Filter: Basiswert, Hebel im Suchband, Preis 4–25 €
-    - Client-Filter: Richtung + KO-Plausibilität (Long: KO < Spot, Short: KO > Spot)
+    - Server-Filter: Basiswert, Richtung, Hebel im Suchband, Preis 4–25 €
+    - Client-Filter: KO-Plausibilität (Long: KO < Spot, Short: KO > Spot) als
+      Schutz falls der Richtungsfilter sich serverseitig wieder ändert
     - 'Bestes' = Hebel am nächsten am Zielhebel des Risikoprofils
-    - Spread per Detail-Abfrage (Bid/Ask) ergänzt
+    - Bid-Preis aus der Suche übernommen; ein Ask/Spread ist über die
+      kostenlose Vontobel-API nicht ermittelbar (siehe Kommentar unten)
     Gibt None zurück wenn nichts gefunden → Aufrufer nutzt Parameter-Fallback.
     Hinweis: durchsucht nur Vontobel (einzige stabil zugängliche Gratis-API);
     SG/HSBC/BNP-Alternativen bleiben dem manuellen Finder vorbehalten.
@@ -3139,6 +3345,7 @@ def find_best_turbo(ticker: str, direction: str,
     try:
         body = {"productType": 5, "page": 0, "pageSize": 50, "filters": [
             {"property": 1,  "selectedItems": [{"key": key}]},
+            {"property": 4,  "selectedItem": {"key": want_dir}},
             {"property": 14, "selectedItem": {"min": hebel_lo, "max": hebel_hi}},
             {"property": 58, "selectedItem": {"min": 4, "max": 25}},
         ]}
@@ -3160,9 +3367,7 @@ def find_best_turbo(ticker: str, direction: str,
             log.info(f"  ℹ️  Vontobel: kein {direction}-Turbo im Hebel-Band für {ticker}")
             return None
 
-        # Spread-bewusste Auswahl: Top 3 nach Hebel-Nähe, Spread per Detail-
-        # Abfrage prüfen. Erstes Papier mit Spread ≤ 0.8% gewinnt (Reihenfolge
-        # = Hebel-Nähe); erfüllt keines das Kriterium → kleinster Spread.
+        # Top 3 nach Hebel-Nähe zum Zielhebel; das erste gewinnt (siehe unten).
         candidates.sort(key=lambda it: abs(it["leverage"] - hebel_target))
         scored = []
         for it in candidates[:3]:
@@ -3170,6 +3375,14 @@ def find_best_turbo(ticker: str, direction: str,
                          if f.get("isin")), "")
             if not isin:
                 continue
+            # Hinweis: die früher hier verwendete Detail-Route
+            # `{VONTOBEL_API}/products/{isin}` existiert nicht (liefert immer
+            # 404) und lieferte nie einen Ask-Preis — verifiziert per Live-
+            # Test. Die öffentliche Vontobel-API gibt über /products/search
+            # ohnehin nur den Bid (Rücknahmepreis) zurück, keinen Ask; ein
+            # echter Spread ist über die kostenlose API nicht ermittelbar.
+            # Kandidat bleibt trotzdem gültig — Spread wird im Report als
+            # "k.A." ausgewiesen statt einen nie erfüllbaren Grenzwert zu prüfen.
             entry = {
                 "isin":       isin,
                 "wkn":        isin[5:11],
@@ -3181,25 +3394,13 @@ def find_best_turbo(ticker: str, direction: str,
                 "spread_pct": None,
                 "url":        VONTOBEL_PURL + isin,
             }
-            try:
-                rd = requests.get(f"{VONTOBEL_API}/products/{isin}",
-                                  params={"c": "de-de"}, headers=_VT_HEADERS, timeout=12)
-                rd.raise_for_status()
-                price = rd.json().get("payload", {}).get("price", {})
-                bid, ask = price.get("bid"), price.get("ask")
-                if bid and ask and ask > 0:
-                    entry["bid"], entry["ask"] = bid, ask
-                    entry["spread_pct"] = round((ask - bid) / ask * 100, 2)
-            except Exception:
-                pass  # Spread optional — Kandidat bleibt gültig
             scored.append(entry)
-            if entry["spread_pct"] is not None and entry["spread_pct"] <= 0.8:
-                return entry  # Hebel-nächstes Papier mit gutem Spread → fertig
 
         if not scored:
             return None
-        # Kein Kandidat unter 0.8% → den mit dem kleinsten bekannten Spread
-        return min(scored, key=lambda e: e["spread_pct"] if e["spread_pct"] is not None else 99.0)
+        # Ohne verlässlichen Spread: das Hebel-nächste Papier (erstes in
+        # 'scored', da candidates bereits nach Hebel-Nähe sortiert sind) gewinnt.
+        return scored[0]
     except Exception as e:
         log.warning(f"  ⚠️  Vontobel Produktsuche ({ticker}): {e}")
         return None
@@ -3236,11 +3437,11 @@ def turbo_recommendation(ticker: str, direction: str) -> str:
     - Hebel wird aus dem Puffer ABGELEITET (Hebel ≈ 1/KO-Abstand) statt
       unabhängig vorgegeben — KO-Abstand und Hebel können sich bei einem
       Turbo nicht unabhängig voneinander wählen lassen
-    - Auswahlkriterien fürs konkrete Papier: Emittent, Spread, Preisbereich
+    - Auswahlkriterien fürs konkrete Papier: Emittent, Hebel-Nähe, Preisbereich
 
     Konkretes Zertifikat: find_best_turbo() sucht über die Vontobel-API das
-    am besten passende, in DE handelbare Papier (WKN/ISIN, Spread-Check).
-    Schlägt das fehl, bleibt der Parameter-Block mit Finder-Links als Fallback.
+    am besten passende, in DE handelbare Papier (WKN/ISIN). Schlägt das fehl,
+    bleibt der Parameter-Block mit Finder-Links als Fallback.
     """
     if direction == "UNKLAR":
         return "⛔ Keine Empfehlung – Trade-Richtung unklar"
@@ -3290,12 +3491,10 @@ def turbo_recommendation(ticker: str, direction: str) -> str:
     )
 
     if best:
-        if best["spread_pct"] is None:
-            spread_txt = "k.A."
-        else:
-            spread_txt = f"{best['spread_pct']:.2f}%"
-            if best["spread_pct"] > 0.8:
-                spread_txt += "  ⚠️ über 0.8%-Kriterium"
+        # Ask/Spread ist über die kostenlose Vontobel-API nicht ermittelbar
+        # (nur Bid wird geliefert) — vor dem Kauf auf der Produktseite oder
+        # bei onvista prüfen.
+        spread_txt = "k.A. (auf Produktseite prüfen)" if best["spread_pct"] is None else f"{best['spread_pct']:.2f}%"
         preis_txt = (f"Bid {best['bid']:.2f} € / Ask {best['ask']:.2f} €"
                      if best.get("ask") else
                      f"Bid {best['bid']:.2f} €" if best.get("bid") else "k.A.")
@@ -3877,6 +4076,15 @@ def record_outcomes():
             log.warning("  ⚠️  yfinance Fehlschlag #%d für %s",
                 conn.execute("SELECT fail_count FROM yf_failures WHERE ticker=?",
                              (ticker,)).fetchone()[0], ticker)
+            # Rate-Limit betrifft die ganze Runner-IP, nicht nur diesen
+            # Ticker — auch der curl_cffi-Fallback ist dann bereits
+            # fehlgeschlagen (sonst wäre `data` nicht leer). Weitere Ticker
+            # in dieser Runde würden nur weiter gegen dieselbe Sperre laufen.
+            if FETCH_MARKET_DATA_WAS_RATE_LIMITED:
+                log.warning("  ⚠️  Yahoo-Rate-Limit erkannt – Backtest-Runde "
+                            "abgebrochen, restliche %d Ticker übersprungen",
+                            len(rows) - len(seen_tickers))
+                break
             continue
         # Erfolg: Fehlerzähler zurücksetzen
         conn.execute("""
@@ -3965,11 +4173,13 @@ def record_ptr_outcomes():
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
     global CUTOFF
-    CUTOFF = now_utc() - timedelta(hours=LOOKBACK_HOURS)
+    _run_started_at = now_utc()
+    CUTOFF = compute_cutoff(_run_started_at)
 
     log.info(f"\n{'═'*62}")
     log.info(f"  Trump-Impact Monitor  –  {now_utc().strftime('%Y-%m-%d %H:%M:%S UTC')}")
-    log.info(f"  Zeitfenster: ab {CUTOFF.strftime('%Y-%m-%d %H:%M UTC')}  (letzte {LOOKBACK_HOURS}h)")
+    _lookback_h = (_run_started_at - CUTOFF).total_seconds() / 3600
+    log.info(f"  Zeitfenster: ab {CUTOFF.strftime('%Y-%m-%d %H:%M UTC')}  ({_lookback_h:.1f}h, min. {LOOKBACK_HOURS}h)")
     log.info(f"  Modell: {MODEL}")
     log.info(f"{'═'*62}\n")
 
@@ -4000,7 +4210,9 @@ def main():
 
     # ── Truth Social ──────────────────────────────────────────────────────────
     log.info("📡 Truth Social …")
+    ts_fetched, ts_recent, ts_relevant, ts_with_tickers, ts_analysed, ts_seen = 0, 0, 0, 0, 0, 0
     for post in (fetch_truth_social() if SRC_TRUTH else []):
+        ts_fetched += 1
         if _cap_reached():
             break
         text = clean_text(post.get("text", post.get("content", "")))
@@ -4011,24 +4223,32 @@ def main():
         ts = post.get("created_at", post.get("published"))
         if not is_recent(ts):
             continue
+        ts_recent += 1
         if not is_financially_relevant(text, truth_social=True):
             continue
+        ts_relevant += 1
         tickers = find_all_tickers(text)
         if not tickers:
             tickers = discover_tickers_via_claude(text)   # Sektor-Inferenz als Fallback
         if not tickers:
             continue
+        ts_with_tickers += 1
         post_url = post.get("url", post.get("uri", "https://truthsocial.com/@realDonaldTrump"))
         for ticker, confidence in _sorted_tickers(tickers):
             if _cap_reached():
                 break
             if already_seen(event_hash(ticker, text)):
+                ts_seen += 1
                 continue
+            ts_analysed += 1
             _run_analysis("Truth Social", ts, text, ticker, post_url, confidence)
+    log.info(f"  Truth-Trichter: {ts_fetched} geholt → {ts_recent} im Zeitfenster → {ts_relevant} relevant → {ts_with_tickers} mit Ticker → {ts_analysed} analysiert ({ts_seen} bereits gesehen)")
 
     # ── News-RSS (Google News + Finanz-Feeds) ────────────────────────────────
     log.info("\n📰 Nachrichten-RSS …")
+    rss_fetched, rss_recent, rss_trump, rss_relevant, rss_with_tickers, rss_analysed, rss_seen = 0, 0, 0, 0, 0, 0, 0
     for article in (fetch_financial_rss() if SRC_RSS else []):
+        rss_fetched += 1
         if _cap_reached():
             break
         art_url = article.get("url", "")
@@ -4043,25 +4263,32 @@ def main():
             continue
         if not is_recent(article.get("publishedAt")):
             continue
+        rss_recent += 1
         if not mentions_trump(text):
             continue
+        rss_trump += 1
         if not is_financially_relevant(text):
             continue
+        rss_relevant += 1
         tickers = find_all_tickers(text)
         if not tickers:
             tickers = discover_tickers_via_claude(text)  # Fallback wie bei Truth Social
         if not tickers:
             continue
+        rss_with_tickers += 1
         for ticker, confidence in _sorted_tickers(tickers):
             if _cap_reached():
                 break
             if already_seen(event_hash(ticker, text)):
+                rss_seen += 1
                 continue
+            rss_analysed += 1
             _run_analysis(
                 article.get("_source", "RSS"),
                 article.get("publishedAt", ""),
                 text, ticker, art_url, confidence,
             )
+    log.info(f"  News-Trichter: {rss_fetched} geholt → {rss_recent} im Zeitfenster → {rss_trump} mit Trump → {rss_relevant} relevant → {rss_with_tickers} mit Ticker → {rss_analysed} analysiert ({rss_seen} bereits gesehen)")
 
     # ── White House RSS ───────────────────────────────────────────────────────
     log.info("\n🏛️  White House RSS …")
@@ -4138,6 +4365,10 @@ def main():
 
     # Tägliche Summary (nur einmal pro Tag, wenn keine Alerts verschickt wurden)
     _maybe_send_daily_summary(analyzed_log, emails_sent)
+
+    # Lauf als abgeschlossen markieren — nächster Run erweitert CUTOFF bis
+    # hierhin zurück, falls der Cron-Schedule eine Lücke > LOOKBACK_HOURS reißt.
+    save_last_run_ts(_run_started_at)
 
     # WAL explizit in alerts.db zurückschreiben — der Workflow committet nur
     # alerts.db, nicht alerts.db-wal. Ohne Checkpoint ginge der Dedup-Stand

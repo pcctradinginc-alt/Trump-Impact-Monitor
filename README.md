@@ -68,7 +68,10 @@ In den Logs sollten die Quellen erscheinen; bei einem Treffer kommt eine E-Mail.
 
 ### Schritt 5 – Fertig ✅
 
-Der Workflow läuft ab jetzt **automatisch jede volle Stunde** (plus 5 min vor NYSE-Öffnung/-Schluss).
+Der Workflow läuft ab jetzt **automatisch alle 10 Minuten** (Minute 7, 17, 27, … 57; nicht :00 weil GitHub die :00-Schedules unter Last verzögert).
+Plus zwei NYSE-Läufe (5 min vor Öffnung/Schluss, Mo-Fr).
+Das Repo ist Public → Actions-Minuten kostenlos (unbegrenzt).
+Das Zeitfenster erweitert sich automatisch zurück zum letzten erfolgreichen Lauf (max. 24h) – kein Post wird übersehen.
 Bei neuen Alerts erscheint ein Commit `chore: update alerts.db`.
 
 ---
@@ -90,10 +93,10 @@ Bei neuen Alerts erscheint ein Commit `chore: update alerts.db`.
 ## 🔍 Funktionsweise
 
 ```
-Jede Stunde (nur kostenlose Quellen):
+Alle 10 Minuten (nur kostenlose Quellen):
   ┌─ Truth Social     trumpstruth.org RSS → CNN-Archiv → (optional ScrapeCreators)
-  ├─ Finanz-News      CNBC, MarketWatch, Yahoo, Seeking Alpha, WSJ, Google News, Politico
-  ├─ White House      news/, presidential-actions/, briefings-statements/ Feeds
+  ├─ Finanz-News      CNBC, MarketWatch, Yahoo, Seeking Alpha, WSJ, Google News, CNBC Politics, The Hill, Investing.com
+  ├─ White House      news/, presidential-actions/, briefings-statements/ Feeds; USTR press releases; YouTube channel
   ├─ Federal Register Executive Orders & Proklamationen (offizielle API)
   ├─ SEC EDGAR        Trump Form 4 / 13D Insider-Filings (offizielle API)
   └─ OGE 278-T/278e   Periodic Transaction Reports (1× täglich Vollscan)
