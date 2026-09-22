@@ -3332,9 +3332,8 @@ def find_best_turbo(ticker: str, direction: str,
     - 'Bestes' = Hebel am nächsten am Zielhebel des Risikoprofils
     - Bid-Preis aus der Suche übernommen; ein Ask/Spread ist über die
       kostenlose Vontobel-API nicht ermittelbar (siehe Kommentar unten)
-    Gibt None zurück wenn nichts gefunden → Aufrufer nutzt Parameter-Fallback.
-    Hinweis: durchsucht nur Vontobel (einzige stabil zugängliche Gratis-API);
-    SG/HSBC/BNP-Alternativen bleiben dem manuellen Finder vorbehalten.
+    Gibt None zurück wenn nichts gefunden → Aufrufer nutzt find_best_turbo_onvista()
+    als zweite Gratis-Quelle (siehe unten), erst danach den Parameter-Fallback.
     """
     key = _vontobel_underlying_key(ticker)
     if not key:
@@ -3393,6 +3392,7 @@ def find_best_turbo(ticker: str, direction: str,
                 "ask":        None,
                 "spread_pct": None,
                 "url":        VONTOBEL_PURL + isin,
+                "issuer":     "Vontobel",
             }
             scored.append(entry)
 
@@ -3403,6 +3403,145 @@ def find_best_turbo(ticker: str, direction: str,
         return scored[0]
     except Exception as e:
         log.warning(f"  ⚠️  Vontobel Produktsuche ({ticker}): {e}")
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ONVISTA DERIVATE-FINDER  –  zweite Gratis-Quelle (kein API-Key) für ein
+# konkretes Open-End-Knock-Out-Zertifikat, wird NUR genutzt wenn Vontobel
+# nichts findet. Vontobel führt für manche Basiswerte schlicht keine eigenen
+# Turbos (verifiziert live 2026-09-22: MPC, PSX, VLO → 0 Treffer bei
+# Vontobel). Die onvista-API aggregiert dagegen die Finder-Daten mehrerer
+# Emittenten (u.a. Société Générale, Goldman Sachs, J.P. Morgan, BNP
+# Paribas, Morgan Stanley) über einen einzigen öffentlichen JSON-Endpunkt –
+# denselben, den auch die onvista-Webseite (Knock-Out-Box je Basiswert)
+# clientseitig aufruft (aus dem eingebetteten __NEXT_DATA__-Feld
+# "finderRequest" der Server-gerenderten Seite extrahiert, dann direkt
+# gegen die API verifiziert: liefert identisches JSON, kein Key nötig).
+# idExerciseRight: 1 = PUT (Short-Turbo), 2 = CALL (Long-Turbo) — verifiziert
+# anhand der zurückgegebenen "nameExerciseRight"-Werte.
+# gearingAsk = Hebel, knockOutAbs = KO-Level in der Basiswert-Währung,
+# spreadAskPct = echter Geld/Brief-Spread in % (im Gegensatz zu Vontobel,
+# das über die Gratis-API keinen Ask/Spread liefert).
+# ─────────────────────────────────────────────────────────────────────────────
+ONVISTA_FINDER_API = "https://api.onvista.de/api/v1/derivatives/finder/configuration_query"
+_ONVISTA_ENTITY_CACHE: dict = {}
+
+
+def _onvista_underlying_entity(ticker: str):
+    """Löst Ticker → (entityType, entityValue) für die onvista-Finder-API auf
+    (Firmenname zuerst, dann Ticker – analog zu _onvista_underlying_url)."""
+    t = ticker.upper()
+    if t in _ONVISTA_ENTITY_CACHE:
+        return _ONVISTA_ENTITY_CACHE[t]
+
+    search_terms = [t]
+    company = (ENTITIES.get(t, {}).get("company") or [None])[0]
+    if company:
+        search_terms.append(company)
+
+    result = None
+    for term in search_terms:
+        try:
+            r = requests.get(
+                "https://api.onvista.de/api/v1/instruments/query",
+                params={"searchValue": term},
+                headers={"User-Agent": FEED_AGENT}, timeout=10,
+            )
+            r.raise_for_status()
+            for item in r.json().get("list", []):
+                if item.get("entityType") != "STOCK":
+                    continue
+                sym = (item.get("homeSymbol") or item.get("symbol") or "").upper()
+                if sym == t or term != t:
+                    ev = item.get("entityValue")
+                    if ev:
+                        result = ("STOCK", ev)
+                    break
+            if result:
+                break
+        except Exception as e:
+            log.warning(f"  ⚠️  onvista Entity-Suche ({term}): {e}")
+    _ONVISTA_ENTITY_CACHE[t] = result
+    return result
+
+
+def find_best_turbo_onvista(ticker: str, direction: str, spot_price: float,
+                            hebel_lo: float, hebel_hi: float, hebel_target: float):
+    """
+    Zweite Gratis-Quelle: onvista-Derivate-Finder (kein API-Key), aggregiert
+    über mehrere Emittenten. Wird nur aufgerufen, wenn find_best_turbo()
+    (Vontobel) keinen Treffer liefert.
+    Gleiche Logik/Rückgabeform wie find_best_turbo(): Server-Filter Basiswert
+    + Richtung, Client-Filter Open-End + Hebel-Band + KO-Plausibilität
+    (Long: KO < Spot, Short: KO > Spot) + Preisband 4–25 € + 'Bestes' = Hebel
+    am nächsten am Zielhebel.
+    Gibt None zurück wenn nichts gefunden → Aufrufer nutzt Parameter-Fallback.
+    """
+    entity = _onvista_underlying_entity(ticker)
+    if not entity:
+        log.info(f"  ℹ️  onvista: kein Underlying für {ticker} → kein konkretes Zertifikat")
+        return None
+    entity_type, entity_value = entity
+
+    want_right = 2 if direction == "LONG" else 1   # 2 = CALL/Long, 1 = PUT/Short
+    try:
+        r = requests.get(
+            ONVISTA_FINDER_API,
+            params={
+                "application": "WEBSITE", "device": "DESKTOP",
+                "entityTypeUnderlying": entity_type,
+                "entityValueUnderlying": entity_value,
+                "page": 0, "perPage": 100,
+                "queryParameters": f"entitySubType=KNOCKOUT_CERTIFICATE&idExerciseRight={want_right}&",
+            },
+            headers={"User-Agent": FEED_AGENT, "Accept": "application/json"},
+            timeout=12,
+        )
+        r.raise_for_status()
+        candidates = []
+        for it in r.json().get("list", []):
+            if it.get("idExerciseRight") != want_right or not it.get("openEnded"):
+                continue
+            lev = it.get("gearingAsk")
+            ko  = it.get("knockOutAbs")
+            if not lev or not ko or not (hebel_lo <= lev <= hebel_hi):
+                continue
+            # KO-Plausibilität wie bei Vontobel: Long KO < Spot, Short KO > Spot
+            if (direction == "LONG" and ko >= spot_price) or \
+               (direction == "SHORT" and ko <= spot_price):
+                continue
+            ask = it.get("quote", {}).get("ask")
+            if ask is None or not (4 <= ask <= 25):
+                continue
+            candidates.append(it)
+        if not candidates:
+            log.info(f"  ℹ️  onvista: kein {direction}-Turbo im Hebel-Band für {ticker}")
+            return None
+
+        candidates.sort(key=lambda it: abs(it["gearingAsk"] - hebel_target))
+        best = candidates[0]
+        instr = best.get("instrument", {})
+        isin  = instr.get("isin", "")
+        if not isin:
+            return None
+        wkn = instr.get("wkn") or isin[5:11]   # API liefert WKN; isin[5:11] nur Fallback
+        quote = best.get("quote", {})
+        spread_pct = best.get("spreadAskPct")
+        return {
+            "isin":       isin,
+            "wkn":        wkn,
+            "leverage":   best["gearingAsk"],
+            "ko":         best["knockOutAbs"],
+            "buffer_pct": round(best.get("differenceKnockOutPct", 0), 1),
+            "bid":        quote.get("bid"),
+            "ask":        quote.get("ask"),
+            "spread_pct": round(spread_pct, 2) if spread_pct is not None else None,
+            "url":        instr.get("urls", {}).get("WEBSITE", ""),
+            "issuer":     (best.get("issuer") or {}).get("name") or "onvista",
+        }
+    except Exception as e:
+        log.warning(f"  ⚠️  onvista Produktsuche ({ticker}): {e}")
         return None
 
 
@@ -3440,8 +3579,11 @@ def turbo_recommendation(ticker: str, direction: str) -> str:
     - Auswahlkriterien fürs konkrete Papier: Emittent, Hebel-Nähe, Preisbereich
 
     Konkretes Zertifikat: find_best_turbo() sucht über die Vontobel-API das
-    am besten passende, in DE handelbare Papier (WKN/ISIN). Schlägt das fehl,
-    bleibt der Parameter-Block mit Finder-Links als Fallback.
+    am besten passende, in DE handelbare Papier (WKN/ISIN). Schlägt das fehl
+    (Vontobel führt nicht für jeden Basiswert eigene Turbos), versucht
+    find_best_turbo_onvista() dieselbe Suche über die onvista-Finder-API
+    (aggregiert weitere Emittenten). Schlagen beide fehl, bleibt der
+    Parameter-Block mit Finder-Links als Fallback.
     """
     if direction == "UNKLAR":
         return "⛔ Keine Empfehlung – Trade-Richtung unklar"
@@ -3480,6 +3622,14 @@ def turbo_recommendation(ticker: str, direction: str) -> str:
         # als das Risikoprofil erlaubt.
         best = find_best_turbo(ticker, direction,
                                max(1.5, round(hebel * 0.5, 1)), hebel_hi, hebel)
+    if not best:
+        # Vontobel führt für manche Basiswerte keine eigenen Turbos (z.B.
+        # MPC/PSX/VLO) → zweite Gratis-Quelle (onvista, mehrere Emittenten).
+        best = find_best_turbo_onvista(ticker, direction, price,
+                                       hebel_lo, hebel_hi, hebel)
+    if not best:
+        best = find_best_turbo_onvista(ticker, direction, price,
+                                       max(1.5, round(hebel * 0.5, 1)), hebel_hi, hebel)
 
     header = (
         f"{emoji} {typ} Open End Turbo auf {ticker}\n"
@@ -3493,15 +3643,17 @@ def turbo_recommendation(ticker: str, direction: str) -> str:
     if best:
         # Ask/Spread ist über die kostenlose Vontobel-API nicht ermittelbar
         # (nur Bid wird geliefert) — vor dem Kauf auf der Produktseite oder
-        # bei onvista prüfen.
+        # bei onvista prüfen. Die onvista-Quelle liefert dagegen einen echten
+        # Ask/Spread mit.
         spread_txt = "k.A. (auf Produktseite prüfen)" if best["spread_pct"] is None else f"{best['spread_pct']:.2f}%"
         preis_txt = (f"Bid {best['bid']:.2f} € / Ask {best['ask']:.2f} €"
                      if best.get("ask") else
                      f"Bid {best['bid']:.2f} €" if best.get("bid") else "k.A.")
+        issuer_txt = best.get("issuer") or "Vontobel"
         return (
             header
             + f"   ──────────────────────────────────\n"
-            + f"   ✅ BESTES ZERTIFIKAT (in DE handelbar, Vontobel):\n"
+            + f"   ✅ BESTES ZERTIFIKAT (in DE handelbar, {issuer_txt}):\n"
             + f"   WKN:               {best['wkn']}\n"
             + f"   ISIN:              {best['isin']}\n"
             + f"   Hebel:             {best['leverage']:.2f}x\n"
