@@ -1,0 +1,32 @@
+name: Pipeline Selftest
+
+# Manuell: Beispiel-Post → Haiku → Sonnet → Turbo Selector DE.
+# Keine E-Mail, kein Commit von alerts.db. Kosten: 1 Haiku- + 1 Sonnet-Call.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Offline-Tests
+        run: pip install pytest && python -m pytest -q tests
+      - name: Live-Selbsttest (ohne Mailversand)
+        env:
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          GMAIL_EMAIL:        selftest@example.invalid
+          GMAIL_APP_PASSWORD: selftest
+          RECIPIENT_EMAIL:    selftest@example.invalid
+        run: python -u selftest.py
