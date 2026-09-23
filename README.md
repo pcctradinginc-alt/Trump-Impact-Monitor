@@ -68,7 +68,7 @@ In den Logs sollten die Quellen erscheinen; bei einem Treffer kommt eine E-Mail.
 
 ### Schritt 5 – Fertig ✅
 
-Der Workflow läuft ab jetzt **automatisch alle 10 Minuten** (Minute 7, 17, 27, … 57; nicht :00 weil GitHub die :00-Schedules unter Last verzögert).
+Der Monitor läuft als **Dauerschleife** (`monitor-loop.yml`): alle 5 Minuten ein Durchlauf, nach ~5,5 h startet sich der Job selbst neu. GitHubs Cron war zu unzuverlässig (statt alle 10 min oft nur alle 1,5–5 h). Der Cron in `trump-monitor.yml` bleibt als Sicherheitsnetz und startet die Schleife neu, falls sie abreißt. `alerts.db` wird nach jeder Alert-Mail sofort, sonst stündlich committet. **Stoppen:** Actions → „Trump Monitor Loop“ → Disable workflow. **Starten:** Actions → „Trump Monitor Loop“ → Run workflow.
 Plus zwei NYSE-Läufe (5 min vor Öffnung/Schluss, Mo-Fr).
 Das Repo ist Public → Actions-Minuten kostenlos (unbegrenzt).
 Das Zeitfenster erweitert sich automatisch zurück zum letzten erfolgreichen Lauf (max. 24h) – kein Post wird übersehen.
@@ -94,7 +94,7 @@ Bei neuen Alerts erscheint ein Commit `chore: update alerts.db`.
 ## 🔍 Funktionsweise
 
 ```
-Alle 10 Minuten (nur kostenlose Quellen):
+Alle 5 Minuten (nur kostenlose Quellen):
   ┌─ Truth Social     trumpstruth.org RSS → CNN-Archiv → (optional ScrapeCreators)
   ├─ Finanz-News      CNBC, MarketWatch, Yahoo, Seeking Alpha, WSJ, Google News, CNBC Politics, The Hill, Investing.com
   ├─ White House      news/, presidential-actions/, briefings-statements/ Feeds; USTR press releases; YouTube channel

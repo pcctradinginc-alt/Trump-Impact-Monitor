@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write          # needed for git push (DB update)
+  actions: write           # Sicherheitsnetz: monitor-loop.yml neu starten
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -96,3 +97,19 @@ jobs:
           done
           echo "::error::alerts.db konnte nicht gepusht werden"
           exit 1
+
+      # ── 6. Sicherheitsnetz: Dauerschleife (monitor-loop.yml) neu starten,
+      #     falls sie weder läuft noch wartet (z. B. abgerissen oder nie gestartet)
+      - name: Monitor-Schleife sicherstellen
+        if: success() || failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          active=$(gh run list --workflow monitor-loop.yml --limit 20 \
+                     --json status -q '[.[] | select(.status != "completed")] | length')
+          if [ "${active:-0}" = "0" ]; then
+            echo "Keine aktive Monitor-Schleife – starte neu"
+            gh workflow run monitor-loop.yml --ref "${GITHUB_REF_NAME}"
+          else
+            echo "Monitor-Schleife aktiv ($active)"
+          fi
