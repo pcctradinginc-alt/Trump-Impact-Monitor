@@ -1,0 +1,126 @@
+name: Trump Monitor Loop
+
+# Dauerschleife statt Cron: GitHub drosselt geplante Läufe stark (beobachtet:
+# statt alle 10 min nur alle 1,5–5 h). Dieser Job prüft alle 5 min die Quellen,
+# läuft bis ~5,5 h (Job-Limit 6 h) und startet sich danach selbst neu.
+# Repo ist public → Actions-Minuten kostenlos.
+#
+# alerts.db bleibt zwischen den Runden auf dem Runner. Commit nur, wenn eine
+# Alert-Mail rausging (Dedup-Stand sofort sichern) oder spätestens stündlich —
+# ein Commit pro Runde würde das Repo um Hunderte MB pro Tag aufblähen.
+#
+# Sicherheitsnetz: trump-monitor.yml (Cron) startet diese Schleife neu, falls
+# sie abgerissen ist. Stoppen: Workflow in der Actions-UI deaktivieren.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # alerts.db pushen
+  actions: write    # sich selbst neu starten
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Gleiche Gruppe wie trump-monitor.yml → nie zwei Läufe parallel auf alerts.db
+concurrency:
+  group: trump-monitor
+  cancel-in-progress: false
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - run: pip install -r requirements.txt
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
+
+      - name: Monitor-Schleife (alle 5 min, ~5,5 h)
+        env:
+          ANTHROPIC_API_KEY:       ${{ secrets.ANTHROPIC_API_KEY }}
+          SCRAPE_CREATORS_API_KEY: ${{ secrets.SCRAPE_CREATORS_API_KEY }}
+          GMAIL_EMAIL:             ${{ secrets.GMAIL_EMAIL }}
+          GMAIL_APP_PASSWORD:      ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL:         ${{ secrets.RECIPIENT_EMAIL }}
+        run: |
+          git config --global user.name  "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+
+          events_count() {
+            python -c "import sqlite3; print(sqlite3.connect('alerts.db').execute('SELECT COUNT(*) FROM events').fetchone()[0])" 2>/dev/null || echo 0
+          }
+
+          commit_db() {
+            git add alerts.db
+            if git diff --staged --quiet; then return 0; fi
+            git commit -q -m "chore: update alerts.db [skip ci]"
+            for i in 1 2 3; do
+              if ! git pull -q --rebase --autostash origin "${GITHUB_REF_NAME}"; then
+                git rebase --abort 2>/dev/null || true
+              fi
+              if git push -q; then return 0; fi
+              echo "Push fehlgeschlagen (Versuch $i/3) – retry in 10s"; sleep 10
+            done
+            echo "::warning::alerts.db konnte nicht gepusht werden – nächster Versuch in der nächsten Runde"
+          }
+
+          END=$((SECONDS + 330*60 - 15*60))   # Puffer bis zum Job-Timeout
+          INTERVAL=300
+          last_commit=$SECONDS
+          oge_done=""
+
+          while [ $SECONDS -lt $END ]; do
+            start=$SECONDS
+
+            # Neuen Code von main übernehmen (z. B. gemergte PRs); die lokal
+            # geänderte alerts.db wird per --autostash beiseitegelegt
+            git pull -q --rebase --autostash origin "${GITHUB_REF_NAME}" || git rebase --abort 2>/dev/null || true
+
+            # OGE-Vollscan (Playwright) einmal pro Werktag ab 13:25 UTC
+            today=$(date -u +%F); hm=$(date -u +%H%M); dow=$(date -u +%u)
+            if [ "$dow" -le 5 ] && [ "$hm" -ge 1325 ] && [ "$oge_done" != "$today" ]; then
+              export OGE_FULL=1; oge_done=$today
+            else
+              export OGE_FULL=0
+            fi
+
+            before=$(events_count)
+            timeout 20m python -u main.py || echo "::warning::main.py endete mit Fehler ($?) – Schleife läuft weiter"
+            after=$(events_count)
+
+            if [ "$after" != "$before" ] || [ $((SECONDS - last_commit)) -ge 3600 ]; then
+              commit_db
+              last_commit=$SECONDS
+            fi
+
+            wait=$((INTERVAL - (SECONDS - start)))
+            [ $wait -gt 0 ] && sleep $wait
+          done
+
+          commit_db
+
+      # Auch nach Fehlern neu starten, nicht aber nach manuellem Abbruch
+      - name: Schleife neu starten
+        if: success() || failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run monitor-loop.yml --ref "${GITHUB_REF_NAME}"
