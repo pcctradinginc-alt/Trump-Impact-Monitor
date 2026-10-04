@@ -237,3 +237,11 @@ if __name__ == "__main__":
             print(f"FAIL {name}: {e}")
     print(f"\n{len(tests) - failures}/{len(tests)} passed")
     sys.exit(1 if failures else 0)
+
+
+def test_trump_signature_is_not_djt_stock():
+    assert "DJT" not in [t for t, _ in main.find_all_tickers(
+        "Europe has just agreed to release Diesel Oil. Thank you! President DJT")]
+    assert "DJT" not in [t for t, _ in main.find_all_tickers(
+        "A great day for America. President DONALD J. TRUMP")]
+    assert "DJT" in [t for t, _ in main.find_all_tickers("Truth Social parent $DJT is soaring")]

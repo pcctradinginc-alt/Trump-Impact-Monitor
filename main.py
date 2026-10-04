@@ -641,6 +641,9 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
     Tier 2 – company : case-insensitiv, Firmenname/CEO (nur bekannte 512) → "hoch"
     Tier 3 – weak    : case-insensitiv, Finanzkontext, Mindestlänge ≥5 → "niedrig"
     """
+    # Trumps Signatur ("President DJT" / "President DONALD J. TRUMP") ist keine
+    # Erwähnung der Aktie DJT (Trump Media) → vor dem Matching entfernen.
+    text = re.sub(r"President\s+(?:DJT|DONALD\s+J\.?\s+TRUMP)\b", " ", text)
     results:     list[tuple[str, str]] = []
     seen:        set[str]              = set()
     has_finance: bool                  = is_financially_relevant(text)

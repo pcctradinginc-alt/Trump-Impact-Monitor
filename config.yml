@@ -7185,6 +7185,9 @@ turbo_selector:
   financing_cost_weight: 1.0
 
   # ── Entscheidung ──────────────────────────────────────────────────────────
+  # Mindestwert der konservativen Rendite für eine Empfehlung (WATCH/ACTIONABLE).
+  # Darunter ist der Vorteil nach Kosten/KO-Risiko zu klein → NO TRADE.
+  min_conservative_return: 0.005
   actionable_confidence_min: 0.55   # SIGNAL_CONFIDENCE_PCT/100 ab dem ACTIONABLE statt WATCH möglich ist
 
   # NO_TRADE-Turbo-Selector-Ergebnisse trotzdem per E-Mail senden (klar als

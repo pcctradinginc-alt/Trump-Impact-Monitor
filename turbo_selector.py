@@ -854,9 +854,10 @@ def rank_and_decide(candidates: list[ProductMetrics], signal: MarketSignal,
     # Nur Produkte mit positivem konservativem EV sind empfehlbar — erst
     # filtern, dann ranken (sonst verdeckt ein Top-Score mit negativem
     # konservativem EV ein empfehlbares Produkt dahinter).
-    eligible = [c for c in candidates if c.conservative_expected_return > 0]
+    min_cons = cfg.get("min_conservative_return", 0.005)
+    eligible = [c for c in candidates if c.conservative_expected_return > min_cons]
     if not eligible:
-        return ("NO_TRADE", "kein Produkt mit positivem konservativem Expected Return",
+        return ("NO_TRADE", f"kein Produkt mit konservativem Expected Return über {min_cons*100:.1f} %",
                candidates[0], median_score, None)
     best = eligible[0]
     best_alt = next((c for c in eligible[1:] if c.product.issuer != best.product.issuer), None)
