@@ -103,10 +103,14 @@ Alle 5 Minuten (nur kostenlose Quellen):
   └─ OGE 278-T/278e   Periodic Transaction Reports (1× täglich Vollscan)
          │
          ▼
-  Entity Resolution (entities.json, 3-Tier + ALL-CAPS-Schutz)
-         │  Ticker gefunden? (sonst: Claude-Sektor-Inferenz)
+  Truth Social / White House / Federal Register: STATEMENT-FIRST
+    1 Haiku-Triage-Call je Post (Cache: Tabelle post_triage) →
+    relevant? + bis zu 3 Basiswerte (NAMED / SECTOR / MACRO)
+    — auch Auslandswerte (BAYN.DE) und Makro (DAX/SPX/NDX/EURUSD/GOLD/BRENT/WTI)
+  News-RSS: Entity Resolution (entities.json, 3-Tier + ALL-CAPS-Schutz)
+         │  Ticker gefunden? (sonst: Claude-Sektor-Inferenz) → Haiku-Pre-Screen
          ▼
-  Haiku-Pre-Screen (~$0.0002) → nur bei ACTIONABLE:
+  Claude Sonnet (triagierte Basiswerte ohne Pre-Screen):
   Claude Sonnet: Sentiment · Magnitude · Trade-Richtung · Stop-Level
   + Trump-Interessenkonflikt inkl. Performance seit Trump-Kauf
          │
@@ -115,11 +119,29 @@ Alle 5 Minuten (nur kostenlose Quellen):
   Fallback bei Fehlern: alte Parameter-Heuristik (turbo_recommendation)
          │
          ▼
-  Gmail-Alert (HTML) · SQLite-Dedup · 4h-Ticker-Cooldown · Tages-Cap
+  Gmail-Alert (HTML, Kurzfazit-Box oben) · SQLite-Dedup · 4h-Ticker-Cooldown · Tages-Cap
 ```
+
+**Neuer Truth-Flow (statement-first):** Die Aussage wird zuerst bewertet, dann
+der Basiswert gewählt — nicht umgekehrt. Explizit genannte Firmen (auch
+nicht-US wie Bayer) haben Vorrang; bei Rohstoff-/Zoll-/Fed-/Geopolitik-Aussagen
+ist der Makro-Basiswert (z.B. BRENT SHORT bei mehr Ölangebot) das PRIMÄRE
+Subjekt. Betreff: `📈 Trump-Impact – Bayer (BAYN.DE) [LONG · ACTIONABLE] – Truth Social`;
+ganz oben in der Mail steht ein Kurzfazit (Aussage, Basiswert + Richtung +
+Horizont, empfohlener Turbo oder NO TRADE mit Grund). Truth-Items der Art
+NAMED/MACRO nutzen `thresholds.truth_min_confidence` (LOW), alles andere
+`min_confidence_score`.
+
+**Tages-Digest:** höchstens eine Mail pro Tag (20–21 UTC), nur wenn es mindestens
+eine marktrelevante Trump-Aussage gab (Tabelle: Zeit, Aussage, Basiswert +
+Richtung, Ergebnis Alert/NO TRADE + Grund). Keine relevante Aussage → keine Mail.
+Abschaltbar mit `alerts.daily_digest: false`.
 
 **Dedup-Schutz gegen Doppel-E-Mails:**
 - SQLite-Hash pro (Ticker, Text) – über Runs hinweg via Repo-Commit
+- Terminale Entscheidungen (Haiku/Sonnet NO_TRADE, Gates, Selector-NO-TRADE) werden
+  in `terminal_decisions` gemerkt → derselbe Text löst nie wieder einen API-Call aus
+  (Cooldown-Skips werden bewusst NICHT gemerkt und später erneut versucht)
 - 4-h-Cooldown pro Ticker (gleiche Story aus mehreren Medien = 1 Alert)
 - Workflow-`concurrency`-Lock – nie zwei Läufe parallel
 - `git pull --rebase` + Retry beim DB-Commit – kein Verlust des Dedup-Stands
@@ -194,13 +216,18 @@ CREATE TABLE IF NOT EXISTS an).
 | `priced_in_fraction` | Schwelle für "bereits eingepreist" |
 | `contradiction_threshold`, `against_reaction_fraction` | Schwellen für "Signal widersprüchlich" (Gegentrend / Gegenreaktion seit Post) |
 | `max_spread_pct`, `max_leverage`, `min_ko_distance_pct`, `min_ko_distance_vol_mult` | harte Produktfilter |
-| `freshness_minutes`, `stale_relax_factor` | Kursfrische während/außerhalb der Handelszeit (grobe Xetra-Heuristik Mo–Fr 07–21 UTC) |
+| `freshness_minutes` | Kursfrische während der Handelszeit (Mo–Fr 07–21 UTC); außerhalb zählt der Kurs des letzten Handelstags (Hinweis in der Mail) |
 | `n_paths`, `mc_seed` | Monte-Carlo-Parameter |
 | `financing_reference_rate`, `financing_issuer_spread`, `short_financing_is_credit` | vereinfachtes Finanzierungskosten-Modell |
 | `uncertainty_shrink`, `conservative_ci_percentile` | Konfidenz-Schrumpfung für die konservative Rendite |
 | `score_per_exposure`, `ko_penalty`, `uncertainty_penalty`, `spread_cost_weight`, `financing_cost_weight` | Score-Formel und -Gewichte |
 | `actionable_confidence_min` | ab welcher Konfidenz ACTIONABLE statt WATCH möglich ist |
-| `send_no_trade_alerts` | ob NO-TRADE-Ergebnisse des Selectors trotzdem gemailt werden (klar markiert) |
+| `send_no_trade_alerts` | ob NO-TRADE-Ergebnisse des Selectors trotzdem gemailt werden (Default `false`; sie landen dann nur im Tages-Digest via `post_triage.outcome`) |
+
+Weitere neue Schalter in `config.yml`: `thresholds.truth_min_confidence` (LOW),
+`alerts.daily_digest` (true). `python -u selftest.py` (Workflow selftest.yml)
+prüft mit echtem Key zwei Beispiel-Posts (Bayer-Werk, EU-Diesel) end-to-end:
+Triage → Sonnet → Selector → Kurzfazit.
 
 **Bekannte Grenzen (bewusste Vereinfachungen, dokumentiert im Code):**
 - Vontobels kostenlose API liefert keinen Ask-Preis → deren Kandidaten

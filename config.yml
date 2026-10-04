@@ -7085,6 +7085,11 @@ thresholds:
   # Minimale Claude-Konfidenz für E-Mail-Versand: HIGH / MEDIUM / LOW
   min_confidence_score: MEDIUM
 
+  # Truth-Social-Posts mit direkter Aussage (Triage-Art NAMED = Firma genannt,
+  # MACRO = Index/Öl/Gold/EURUSD …) sind Primärquelle: niedrigere Schwelle.
+  # Alles andere (News, SECTOR-Ableitungen, WH/FedReg) nutzt min_confidence_score.
+  truth_min_confidence: LOW
+
   # Minimale Magnitude für E-Mail-Versand: SMALL / MEDIUM / LARGE
   # SMALL = <3% intraday — bei vielen False Positives auf MEDIUM erhöhen
   min_magnitude: SMALL
@@ -7121,6 +7126,11 @@ alerts:
   # Retweets von Trump's eigenem Account alertieren?
   include_retweets: false
 
+  # Tages-Digest (eine Mail/Tag, 20–21 UTC) mit allen marktrelevanten Trump-
+  # Aussagen des Tages + Ergebnis (Alert / NO TRADE + Grund). Gesendet wird nur,
+  # wenn es mindestens eine relevante Aussage gab. false = komplett aus.
+  daily_digest: true
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TURBO SELECTOR  –  "Trump Post → Turbo Selector DE"
 # Analyse-only Pipeline: Signal → Marktbestätigung → deutsche Turbo-Zertifikate
@@ -7148,7 +7158,8 @@ turbo_selector:
   min_ko_distance_pct: 3.0       # absoluter Mindestabstand KO↔Spot in %
   min_ko_distance_vol_mult: 1.0  # zusätzlich: k * HV * sqrt(horizon/252)
   freshness_minutes: 30          # max. Alter des Kurses während Handelszeiten
-  stale_relax_factor: 8          # Faktor für freshness_minutes außerhalb der Handelszeiten (Xetra-Fenster grob 07–21 UTC, Mo–Fr)
+  # Außerhalb der Handelszeit (Mo–Fr 07–21 UTC) zählt der Kurs aus dem Schluss-
+  # fenster des letzten Handelstags (ab 15:00 UTC) als frisch genug.
 
   # ── Monte-Carlo-Parameter (P(KO), Rendite) ───────────────────────────────
   n_paths: 4000
@@ -7179,4 +7190,6 @@ turbo_selector:
   # NO_TRADE-Turbo-Selector-Ergebnisse trotzdem per E-Mail senden (klar als
   # NO TRADE markiert)? Unabhängig von alerts.send_no_trade (das gilt für die
   # gesamte Alert-Direction, nicht speziell den Turbo-Selector-Teil).
-  send_no_trade_alerts: true
+  # false: kein Einzelmail, das Ergebnis steht aber im Tages-Digest
+  # (post_triage.outcome).
+  send_no_trade_alerts: false

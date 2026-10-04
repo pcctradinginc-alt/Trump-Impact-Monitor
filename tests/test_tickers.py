@@ -183,6 +183,47 @@ def test_all_caps_with_dollar_prefix_still_matches():
     assert "DJT" in hits, hits
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phantom tickers seen in production (WH proclamations, Truth Social, news RSS)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_bare_non_watchlist_symbols_in_mixed_text_are_not_tickers():
+    # TOUR/LAW/PLUS/PAC reached Haiku in production as bare uppercase words.
+    text = "Tom Cotton should hold a TOUR of Arkansas; the LAW is clear, PLUS the PAC money"
+    assert not _tickers(text) & {"TOUR", "LAW", "PLUS", "PAC"}
+
+
+def test_dollar_or_exchange_context_still_enables_non_watchlist_symbols():
+    assert "TOUR" in _tickers("Watching $TOUR closely")
+    assert "LAW" in _tickers("CS Disco (NYSE: LAW) rallied")
+
+
+def test_prosperity_is_not_pb():
+    assert "PB" not in _tickers("American innovation, prosperity, and strength define our Nation")
+
+
+def test_private_equity_is_not_eqbk():
+    assert "EQBK" not in _tickers("Trump wants your 401(k) in private equity")
+
+
+def test_gold_star_mothers_day_is_not_stho():
+    assert "STHO" not in _tickers("Gold Star Mother's And Family's Day, 2026 A PROCLAMATION")
+
+
+def test_wall_street_journal_source_is_not_nwsa():
+    assert "NWSA" not in _tickers("Trump announces Super Intelligence Force, Wall Street Journal reported")
+
+
+def test_lowercase_single_word_alias_is_not_a_company_mention():
+    assert "V" not in _tickers("New visa policy for students announced")
+    assert "V" in _tickers("Visa shares jumped after the announcement")
+
+
+def test_bare_watchlist_high_symbols_still_match():
+    assert "NVDA" in _tickers("NVDA surges after the export decision")
+    assert "TSLA" in _tickers("TSLA deliveries beat estimates")
+
+
 if __name__ == "__main__":
     failures = 0
     tests = [(name, fn) for name, fn in list(globals().items())
