@@ -291,7 +291,7 @@ def test_full_select_turbo_no_trade_on_tiny_expected_move(monkeypatch):
     ohne Netzwerk nichts liefert) -> NO_TRADE."""
     closes = synthetic_closes(seed=5, daily_vol=0.01, drift=0.0)
     ts._CLOSES_CACHE["TINY_TEST"] = closes
-    monkeypatch.setattr(ts, "fetch_all_products", lambda underlying, direction: [])
+    monkeypatch.setattr(ts, "fetch_all_products", lambda underlying, direction, name=None: [])
     sig = ts.MarketSignal(underlying="TINY_TEST", yf_symbol="TINY_TEST",
                           direction="LONG", confidence=0.5, expected_return=0.001,
                           horizon_days=3, rationale="tiny", uncertainty="HIGH")

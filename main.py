@@ -26,7 +26,7 @@ from config import (
     MAX_ALERTS, LOOKBACK_HOURS, MIN_CONFIDENCE, MIN_MAGNITUDE,
     SRC_TRUTH, SRC_RSS, SRC_WHITEHOUSE,
     SRC_FEDREGISTER, SRC_EDGAR, SRC_OGE, SEND_NO_TRADE, INCLUDE_RETWEETS,
-    TURBO_SELECTOR_CFG, confidence_ok, magnitude_ok,
+    TURBO_SELECTOR_CFG, confidence_ok, magnitude_ok, MIN_CONFIDENCE_TRUTH, DAILY_DIGEST,
 )
 import turbo_selector  # "Trump Post → Turbo Selector DE" — siehe turbo_selector.py
 
@@ -160,6 +160,31 @@ conn.execute("""
     CREATE TABLE IF NOT EXISTS run_state (
         id           INTEGER PRIMARY KEY CHECK (id = 1),
         last_run_ts  TEXT
+    )
+""")
+# Statement-first-Triage: pro Post ein Haiku-Call, Ergebnis wird gecacht.
+# outcome wird später gefüllt ("alert_sent:NVDA LONG ACTIONABLE" / "no_trade: …")
+# und speist den Tages-Digest.
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS post_triage (
+        hash        TEXT PRIMARY KEY,
+        created_at  TEXT,
+        source      TEXT,
+        url         TEXT,
+        text        TEXT,
+        relevant    INTEGER,
+        reason      TEXT,
+        underlyings TEXT,
+        outcome     TEXT
+    )
+""")
+# Terminale Entscheidungen: (Ticker,Text)-Paare, die ohne Alert endeten und nie
+# wieder geprüft werden sollen (kein API-Call, kein Cooldown-Log).
+conn.execute("""
+    CREATE TABLE IF NOT EXISTS terminal_decisions (
+        hash        TEXT PRIMARY KEY,
+        created_at  TEXT,
+        reason      TEXT
     )
 """)
 conn.commit()
@@ -453,6 +478,26 @@ def event_hash(ticker: str, text: str) -> str:
 def already_seen(h: str) -> bool:
     return conn.execute("SELECT 1 FROM events WHERE hash=?", (h,)).fetchone() is not None
 
+def is_decided(h: str) -> bool:
+    """True wenn für dieses (Ticker,Text)-Paar schon eine terminale Entscheidung
+    ohne Alert vorliegt (siehe mark_decided)."""
+    return conn.execute("SELECT 1 FROM terminal_decisions WHERE hash=?", (h,)).fetchone() is not None
+
+def mark_decided(h: str, reason: str) -> None:
+    """Merkt ein Paar, das ohne Alert endete (Haiku NO_TRADE, unknown-Skip,
+    Konfidenz-/Magnitude-Gate, Relevanz NO, Selector NO_TRADE …). Spätere Runden
+    überspringen es still VOR jedem API-Call. NICHT für Cooldown-/Tages-Cap-
+    Skips verwenden — die sollen nach Ablauf erneut versucht werden."""
+    conn.execute(
+        "INSERT OR REPLACE INTO terminal_decisions (hash, created_at, reason) VALUES (?,?,?)",
+        (h, now_utc().isoformat(), reason[:200]),
+    )
+    conn.commit()
+
+def already_handled(h: str) -> bool:
+    """Dedup-Check der main()-Schleifen: Alert gesendet/analysiert ODER terminal verworfen."""
+    return already_seen(h) or is_decided(h)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # E-MAIL
 # ─────────────────────────────────────────────────────────────────────────────
@@ -568,10 +613,27 @@ _GENERIC_ALIAS_STOPWORDS = {
     "financial", "bank", "energy", "resources", "systems", "solutions",
     "services", "technologies", "ventures", "strategy", "titan", "titans",
     "nasdaq", "advance",
+    # Normale Wörter, die entities.json als einziges Firmenwort führt
+    # (PB → "Prosperity", EQBK → "Equity", STHO → "Star") — in WH-Proklamationen
+    # ("prosperity", "Gold Star Mother's Day") und "private equity"-Schlagzeilen.
+    "prosperity", "equity", "star", "stars", "wall street journal",
+    "rupert murdoch", "tour", "plus", "law", "pacific airport", "news corp",
+    "news corporation", "graham", "fulton", "landmark",
 }
 
 def _is_generic_alias(alias: str) -> bool:
     return alias.strip().lower() in _GENERIC_ALIAS_STOPWORDS
+
+def _alias_in_text(alias: str, text: str) -> bool:
+    """Wortgrenzen-Match des Firmen-Alias (case-insensitiv). Einzelwort-Aliases
+    ('Visa', 'Equity') zählen nur in Groß-/Titelschreibung — kleingeschrieben
+    ('visa policy', 'private equity') sind es normale Wörter."""
+    rx = re.compile(r'\b' + re.escape(alias) + r'\b', re.IGNORECASE)
+    single = " " not in alias.strip()
+    for m in rx.finditer(text):
+        if not single or m.group(0) != m.group(0).lower():
+            return True
+    return False
 
 def find_all_tickers(text: str) -> list[tuple[str, str]]:
     """
@@ -600,11 +662,15 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
         has_dollar_prefix = m.start() > 0 and text[m.start() - 1] == "$"
         has_ticker_marker = has_dollar_prefix or _has_exchange_context(text, t)
         if not has_ticker_marker:
+            # Bare Symbole zählen NUR für die kuratierte priority_high-Liste.
+            # Alles andere (TOUR, LAW, PLUS, PAC, PB, …) ist als Großbuchstaben-
+            # Wort im Fließtext praktisch immer ein normales Wort/Kürzel und
+            # braucht '$', Exchange-Kontext oder einen Firmennamen (Tier 2).
+            if t not in WATCHLIST_HIGH:
+                continue
             if all_caps:
                 continue
             if t in _AMBIGUOUS_SYMBOLS or t in _ACRONYM_STOPLIST:
-                continue
-            if t not in WATCHLIST_HIGH and len(t) < 3:
                 continue
         results.append((t, "hoch"))
         seen.add(t)
@@ -627,7 +693,7 @@ def find_all_tickers(text: str) -> list[tuple[str, str]]:
                 continue
             if _is_generic_alias(alias):
                 continue
-            if re.search(r'\b' + re.escape(alias) + r'\b', normalized, re.IGNORECASE):
+            if _alias_in_text(alias, normalized):
                 results.append((t, "hoch"))
                 seen.add(t)
                 break
@@ -3101,6 +3167,29 @@ YF_TICKER_MAP = {
     "GOOG":  "GOOG",
 }
 
+def yf_symbol_for(ticker: str, is_macro: bool | None = None) -> str:
+    """Yahoo-Symbol für Ticker, Auslandssymbol (BAYN.DE, 005930.KS) oder
+    Makro-Code (BRENT → BZ=F). Makro-Codes gelten nur als Makro, wenn is_macro
+    nicht explizit False ist."""
+    t = ticker.upper()
+    if t in turbo_selector.MACRO_UNDERLYINGS and is_macro is not False:
+        return turbo_selector.MACRO_UNDERLYINGS[t]["yf"]
+    return YF_TICKER_MAP.get(t, t)
+
+_PRICE_UNIT_BY_SUFFIX = {".DE": "EUR", ".F": "EUR", ".PA": "EUR", ".AS": "EUR", ".MI": "EUR",
+                         ".MC": "EUR", ".BR": "EUR", ".HE": "EUR", ".VI": "EUR",
+                         ".L": "GBp", ".SW": "CHF", ".KS": "KRW", ".T": "JPY",
+                         ".HK": "HKD", ".TO": "CAD"}
+
+def price_unit(ticker: str, is_macro: bool | None = None) -> str:
+    t = ticker.upper()
+    if t in turbo_selector.MACRO_UNDERLYINGS and is_macro is not False:
+        return {"DAX": "Punkte", "SPX": "Punkte", "NDX": "Punkte"}.get(t, "USD" if t != "EURUSD" else "")
+    for suf, cur in _PRICE_UNIT_BY_SUFFIX.items():
+        if t.endswith(suf):
+            return cur
+    return "USD"
+
 _YF_LAST_CALL: float = 0.0
 _YF_MIN_INTERVAL = 3.0  # Sekunden zwischen yfinance-Calls (Rate-Limit-Schutz)
 
@@ -3186,7 +3275,7 @@ def fetch_market_data(ticker: str) -> dict:
         time.sleep(wait)
     _YF_LAST_CALL = time.time()
 
-    yf_sym = YF_TICKER_MAP.get(t_upper, t_upper)
+    yf_sym = yf_symbol_for(t_upper)
     rate_limited = False
     # Max. 2 Versuche über yfinance — bei 429 sofort abbrechen (kein
     # Exponential-Backoff-Retry gegen denselben rate-limitenden Endpunkt).
@@ -3219,13 +3308,14 @@ def fetch_market_data(ticker: str) -> dict:
         return result
     return {}
 
-def format_market_block(ticker: str) -> str:
+def format_market_block(ticker: str, is_macro: bool | None = None) -> str:
     d = fetch_market_data(ticker)
     if not d:
         return "Marktdaten: nicht verfügbar"
     def arrow(v): return "▲" if v >= 0 else "▼"
+    unit = price_unit(ticker, is_macro)
     return (
-        f"Letzter Schlusskurs:      {d['price']:.2f} USD\n"
+        f"Letzter Schlusskurs:      {d['price']:.2f} {unit}".rstrip() + "\n"
         f"Ggü. Vortag:              {arrow(d['chg_1d'])} {d['chg_1d']:+.2f}%\n"
         f"5 Handelstage:            {arrow(d['chg_1w'])} {d['chg_1w']:+.2f}%\n"
         f"1 Monat:                  {arrow(d['chg_1m'])} {d['chg_1m']:+.2f}%"
@@ -3448,20 +3538,17 @@ ONVISTA_FINDER_API = "https://api.onvista.de/api/v1/derivatives/finder/configura
 _ONVISTA_ENTITY_CACHE: dict = {}
 
 
-def _onvista_underlying_entity(ticker: str):
+def _onvista_underlying_entity(ticker: str, name: str | None = None):
     """Löst Ticker → (entityType, entityValue) für die onvista-Finder-API auf
-    (Firmenname zuerst, dann Ticker – analog zu _onvista_underlying_url)."""
+    (Ticker, optionaler Name-Hinweis aus der Triage, Firmenname aus
+    entities.json). Suchbegriffe/Auswahl-Logik teilt sich der Code mit
+    turbo_selector (onvista_search_terms / pick_onvista_stock)."""
     t = ticker.upper()
-    if t in _ONVISTA_ENTITY_CACHE:
-        return _ONVISTA_ENTITY_CACHE[t]
-
-    search_terms = [t]
-    company = (ENTITIES.get(t, {}).get("company") or [None])[0]
-    if company:
-        search_terms.append(company)
-
+    ck = (t, (name or "").lower())
+    if ck in _ONVISTA_ENTITY_CACHE:
+        return _ONVISTA_ENTITY_CACHE[ck]
     result = None
-    for term in search_terms:
+    for term in turbo_selector.onvista_search_terms(t, name):
         try:
             r = requests.get(
                 "https://api.onvista.de/api/v1/instruments/query",
@@ -3469,20 +3556,13 @@ def _onvista_underlying_entity(ticker: str):
                 headers={"User-Agent": FEED_AGENT}, timeout=10,
             )
             r.raise_for_status()
-            for item in r.json().get("list", []):
-                if item.get("entityType") != "STOCK":
-                    continue
-                sym = (item.get("homeSymbol") or item.get("symbol") or "").upper()
-                if sym == t or term != t:
-                    ev = item.get("entityValue")
-                    if ev:
-                        result = ("STOCK", ev)
-                    break
-            if result:
+            ev = turbo_selector.pick_onvista_stock(r.json().get("list", []), term, t, name)
+            if ev:
+                result = ("STOCK", ev)
                 break
         except Exception as e:
             log.warning(f"  ⚠️  onvista Entity-Suche ({term}): {e}")
-    _ONVISTA_ENTITY_CACHE[t] = result
+    _ONVISTA_ENTITY_CACHE[ck] = result
     return result
 
 
@@ -3784,6 +3864,205 @@ def _sector_tickers_once(text: str) -> list[tuple[str, str]]:
     return tickers
 
 # ─────────────────────────────────────────────────────────────────────────────
+# STATEMENT-FIRST-TRIAGE  –  erst die Aussage bewerten, dann den Basiswert wählen
+# ─────────────────────────────────────────────────────────────────────────────
+# Ein Haiku-Call pro Post (Ergebnis in post_triage gecacht → jede Aussage wird
+# höchstens einmal triagiert). Ersetzt für Truth/WH/FedReg das Keyword-Gate
+# (is_financially_relevant), die US-only Namensliste als Zwang und den
+# Sektor-Fallback mit Phantom-Tickern.
+TRIAGE_MODEL = "claude-haiku-4-5-20251001"
+TRIAGE_MAX_UNDERLYINGS = 3
+TRIAGE_MIN_LEN = 25            # kürzere Texte (Emoji-/Link-Posts) nie triagieren
+TRIAGE_MAX_FAILS = 3           # danach wird der Post als "nicht relevant" gecacht
+_TRIAGE_SYMBOL_RE = re.compile(r"^[A-Z0-9^][A-Z0-9.\-=^]{0,11}$")
+_TRIAGE_KINDS = ("NAMED", "SECTOR", "MACRO")
+
+_TRIAGE_PROMPT = """You are the first-stage triage for a trading-signal system for a German retail trader who trades Turbo/Knock-out certificates (Turbos exist on DAX/US large caps, major indices, oil, gold, EUR/USD).
+
+Decide whether this statement by President Trump / the White House can move a tradable market, and on WHAT.
+
+STATEMENT ({source}):
+\"\"\"{text}\"\"\"
+
+Answer with STRICT JSON only, no prose, no markdown:
+{{"relevant": true|false, "reason": "<one short sentence>", "underlyings": [{{"symbol": "<Yahoo Finance symbol or macro code>", "name": "<company/underlying name>", "kind": "NAMED|SECTOR|MACRO", "direction": "LONG|SHORT"}}]}}
+
+Rules:
+- "underlyings": at most 3, most important first. Empty list if relevant=false.
+- symbol: Yahoo Finance symbol. US stocks as plain ticker (BA, NVDA), foreign stocks with exchange suffix (BAYN.DE, SAP.DE, 005930.KS, ASML.AS). For broad/macro subjects use exactly one of these macro codes: DAX, SPX, NDX, EURUSD, GOLD, BRENT, WTI.
+- kind NAMED = the company is explicitly named in the statement (ALWAYS prefer the named company, even if it is not a US company). SECTOR = company inferred as beneficiary/loser of a sector statement. MACRO = macro code.
+- For commodity (oil, gas, gold), tariff, Fed/interest-rate, currency, sanctions or geopolitics statements return the macro underlying (e.g. more oil supply -> BRENT or WTI SHORT; tariffs on Europe -> DAX SHORT; weaker dollar talk -> EURUSD LONG).
+- Prefer underlyings on which German Turbos exist (DAX/US large caps, indices, oil, gold, EUR/USD). Avoid obscure small caps, ETFs and private companies.
+- direction = expected price reaction of that underlying (LONG = rises, SHORT = falls).
+- relevant=false for pure domestic politics, endorsements of politicians, attacks on media/people, holidays/condolences, sports, and anything without a plausible price impact.
+- Be decisive: relevant=true only if a trader could act on it today."""
+
+
+def parse_triage_json(raw) -> dict:
+    """Robustes Parsen der Haiku-Triage-Antwort (Code-Fences, Prosa drumherum,
+    Müll). Gibt immer {"ok", "relevant", "reason", "underlyings"} zurück; bei
+    Müll ok=False/relevant=False. Underlyings werden normalisiert (Symbol
+    upper, kind/direction validiert, max. TRIAGE_MAX_UNDERLYINGS, Dubletten
+    raus). Makro-Codes erzwingen kind=MACRO."""
+    bad = {"ok": False, "relevant": False, "reason": "Triage-Antwort nicht lesbar",
+           "underlyings": []}
+    if not isinstance(raw, str) or not raw.strip():
+        return bad
+    txt = raw.strip()
+    txt = re.sub(r"^```[a-zA-Z]*\s*", "", txt)
+    txt = re.sub(r"\s*```\s*$", "", txt).strip()
+    data = None
+    try:
+        data = json.loads(txt)
+    except Exception:
+        i, j = txt.find("{"), txt.rfind("}")
+        if i != -1 and j > i:
+            try:
+                data = json.loads(txt[i:j + 1])
+            except Exception:
+                data = None
+    if not isinstance(data, dict) or "relevant" not in data:
+        return bad
+    rel = data.get("relevant")
+    if isinstance(rel, str):
+        rel = rel.strip().lower() in ("true", "yes", "ja", "1")
+    rel = bool(rel)
+    reason = str(data.get("reason") or "").strip()[:300]
+    unders: list[dict] = []
+    seen_sym: set[str] = set()
+    raw_list = data.get("underlyings")
+    for u in (raw_list if isinstance(raw_list, list) else []):
+        if not isinstance(u, dict):
+            continue
+        sym = str(u.get("symbol") or "").strip().upper().lstrip("$")
+        if not _TRIAGE_SYMBOL_RE.match(sym) or sym in seen_sym:
+            continue
+        direction = str(u.get("direction") or "").strip().upper()
+        if direction not in ("LONG", "SHORT"):
+            continue
+        kind = str(u.get("kind") or "").strip().upper()
+        if sym in turbo_selector.MACRO_UNDERLYINGS:
+            kind = "MACRO"
+        elif kind not in ("NAMED", "SECTOR"):
+            kind = "SECTOR"
+        name = str(u.get("name") or "").strip()[:80]
+        seen_sym.add(sym)
+        unders.append({"symbol": sym, "name": name, "kind": kind, "direction": direction})
+        if len(unders) >= TRIAGE_MAX_UNDERLYINGS:
+            break
+    if not rel:
+        unders = []
+    return {"ok": True, "relevant": rel, "reason": reason, "underlyings": unders}
+
+
+def merge_explicit_tickers(triage: dict, explicit: list[tuple[str, str]]) -> list[dict]:
+    """Triage-Underlyings + explizite find_all_tickers-Treffer ("hoch" → NAMED,
+    Richtung offen = Sonnet entscheidet). Reihenfolge: NAMED, MACRO, SECTOR;
+    Dubletten (auch BA vs. BA.XYZ-Basissymbol) raus; Gesamtzahl begrenzt."""
+    out = list(triage.get("underlyings") or [])
+    have = {u["symbol"].split(".")[0] for u in out}
+    for t, conf in explicit:
+        if conf != "hoch" or t.split(".")[0] in have or t in turbo_selector.MACRO_UNDERLYINGS:
+            continue
+        company = (ENTITIES.get(t, {}).get("company") or [""])[0]
+        out.append({"symbol": t, "name": company, "kind": "NAMED", "direction": None})
+        have.add(t.split(".")[0])
+    rank = {"NAMED": 0, "MACRO": 1, "SECTOR": 2}
+    out.sort(key=lambda u: rank.get(u["kind"], 3))   # stabil
+    return out[:TRIAGE_MAX_UNDERLYINGS + 1]
+
+
+def pick_underlyings(unders: list[dict], limit: int = 3) -> list[dict]:
+    """Welche Underlyings eines triagierten Posts werden analysiert (Sonnet-
+    Kosten!): NAMED/MACRO haben Vorrang, SECTOR-Ableitungen nur wenn nichts
+    Explizites da ist. Reihenfolge NAMED, MACRO, SECTOR; max. `limit`."""
+    primary = [u for u in unders if u["kind"] in ("NAMED", "MACRO")]
+    chosen = primary or [u for u in unders if u["kind"] == "SECTOR"]
+    rank = {"NAMED": 0, "MACRO": 1, "SECTOR": 2}
+    return sorted(chosen, key=lambda u: rank.get(u["kind"], 3))[:limit]
+
+
+def _triage_row_to_result(row) -> dict:
+    try:
+        unders = json.loads(row[2] or "[]")
+    except Exception:
+        unders = []
+    return {"ok": True, "relevant": bool(row[0]), "reason": row[1] or "",
+            "underlyings": unders, "cached": True}
+
+
+def triage_post(source: str, url: str, text: str) -> dict | None:
+    """Statement-first-Triage. Gibt {"relevant","reason","underlyings"} zurück
+    (underlyings inkl. explizit genannter Ticker aus find_all_tickers) oder
+    None bei API-/Parse-Fehler (dann KEIN Cache-Eintrag → nächste Runde erneut,
+    nach TRIAGE_MAX_FAILS Fehlschlägen wird der Post als nicht relevant
+    gecacht). Ein Call je Post, danach nur noch DB-Lookup."""
+    h = get_hash(text)
+    row = conn.execute(
+        "SELECT relevant, reason, underlyings FROM post_triage WHERE hash=?", (h,)
+    ).fetchone()
+    if row:
+        return _triage_row_to_result(row)
+
+    def _store(rel: bool, reason: str, unders: list[dict]) -> dict:
+        conn.execute(
+            "INSERT OR REPLACE INTO post_triage "
+            "(hash, created_at, source, url, text, relevant, reason, underlyings, outcome) "
+            "VALUES (?,?,?,?,?,?,?,?,COALESCE((SELECT outcome FROM post_triage WHERE hash=?), ''))",
+            (h, now_utc().isoformat(), source, url, text[:600], 1 if rel else 0,
+             reason, json.dumps(unders, ensure_ascii=False), h),
+        )
+        conn.commit()
+        return {"ok": True, "relevant": rel, "reason": reason, "underlyings": unders}
+
+    if len(text.strip()) < TRIAGE_MIN_LEN:
+        return _store(False, "zu kurz", [])
+
+    try:
+        resp = client.messages.create(
+            model=TRIAGE_MODEL,
+            max_tokens=400,
+            temperature=0,
+            messages=[{"role": "user", "content": _TRIAGE_PROMPT.format(
+                source=source, text=text[:1500])}],
+        )
+        raw = next((b.text for b in resp.content if getattr(b, "type", "") == "text"), "")
+        parsed = parse_triage_json(raw)
+    except Exception as e:
+        log.warning(f"  ⚠️  Triage-Fehler ({source}): {e}")
+        parsed = {"ok": False}
+
+    if not parsed.get("ok"):
+        fail_key = f"triage_fail:{h}"
+        fails = int(_state_get(fail_key) or 0) + 1
+        _state_set(fail_key, str(fails))
+        if fails >= TRIAGE_MAX_FAILS:
+            return _store(False, "Triage nach mehreren Fehlern verworfen", [])
+        return None
+
+    unders = parsed["underlyings"]
+    if parsed["relevant"]:
+        unders = merge_explicit_tickers(parsed, find_all_tickers(text))
+    rel = parsed["relevant"] and bool(unders)
+    reason = parsed["reason"] or ("keine handelbare Wirkung" if not rel else "")
+    return _store(rel, reason, unders)
+
+
+def triage_set_outcome(text: str, outcome: str) -> None:
+    """Hängt das Ergebnis einer (Ticker,Text)-Analyse an post_triage.outcome
+    (Quelle für den Tages-Digest). No-op wenn der Text nicht triagiert wurde."""
+    try:
+        conn.execute(
+            "UPDATE post_triage SET outcome = CASE WHEN outcome IS NULL OR outcome='' "
+            "THEN ? ELSE outcome || ' | ' || ? END WHERE hash=?",
+            (outcome[:300], outcome[:300], get_hash(text)),
+        )
+        conn.commit()
+    except Exception as e:
+        log.warning(f"  ⚠️  post_triage.outcome Update fehlgeschlagen: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # HAUPTANALYSE  –  LLM + Alert + E-Mail
 # ─────────────────────────────────────────────────────────────────────────────
 # Statischer Prompt-Block — wird gecacht (Anthropic Prompt Caching)
@@ -3833,6 +4112,62 @@ def _haiku_tradeable(ticker: str, text: str) -> bool:
         return True  # im Zweifel Sonnet ran lassen
 
 
+def decision_label(decision: str | None, direction: str) -> str:
+    """Anzeige-Status für Betreff/Kurzfazit: ACTIONABLE / WATCH / NO TRADE."""
+    if decision in ("ACTIONABLE", "WATCH"):
+        return decision
+    if decision == "NO_TRADE" or direction not in ("LONG", "SHORT"):
+        return "NO TRADE"
+    return ""
+
+
+def build_kurzfazit(summary: str, subject_label: str, direction: str, horizon_days: int,
+                    expected_move_pct: float, decision: str | None, sel_result,
+                    raw_text: str = "") -> tuple[str, str]:
+    """Kompakte deutsche Kurzfassung für den Mail-Anfang: Was hat Trump gesagt,
+    Basiswert + Richtung + Horizont, empfohlener Turbo (WKN, Emittent, Hebel,
+    KO-Abstand, P(KO), konservative Rendite) oder NO TRADE mit Grund.
+    Gibt (text, html) zurück."""
+    said = (summary or "").strip() or (raw_text or "").strip()[:200]
+    label = decision_label(decision, direction)
+    subj = (f"{subject_label} · {direction} · Horizont {horizon_days} Handelstage"
+            + (f" · erwartet {expected_move_pct:+.1f}%" if direction in ("LONG", "SHORT") and expected_move_pct else ""))
+    sel = getattr(sel_result, "selected", None) if sel_result is not None else None
+    if sel is not None and decision in ("ACTIONABLE", "WATCH"):
+        p = sel.product
+        turbo = (f"WKN {p.wkn} · {p.issuer} · Hebel {p.leverage:.1f}x · "
+                 f"KO-Abstand {sel.ko_distance_pct:.1f}% · P(KO) {sel.p_ko*100:.1f}% · "
+                 f"konservative Rendite {sel.conservative_expected_return*100:+.1f}%")
+    elif decision == "NO_TRADE":
+        reason = getattr(sel_result, "reason", "") if sel_result is not None else ""
+        turbo = f"NO TRADE – {reason or 'kein geeignetes Produkt'}"
+    elif direction not in ("LONG", "SHORT"):
+        turbo = "NO TRADE – kein klares LONG/SHORT-Signal"
+    else:
+        turbo = "Turbo-Auswahl nicht verfügbar (siehe Fallback-Heuristik unten)"
+    head = f"[{label}] " if label else ""
+    text = f"KURZFAZIT {head}\nTrump: {said}\nBasiswert: {subj}\nTurbo: {turbo}"
+
+    colors = {"ACTIONABLE": ("#ecfdf5", "#10b981", "#065f46"),
+              "WATCH":      ("#fffbeb", "#f59e0b", "#92400e"),
+              "NO TRADE":   ("#fef2f2", "#ef4444", "#991b1b")}
+    bg, border, fg = colors.get(label, ("#f5f5f7", "#9ca3af", "#1d1d1f"))
+    ff = "-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif"
+    esc = html.escape
+    box = (
+        f'<tr><td style="background:#ffffff;padding:20px 32px 4px;">'
+        f'<div style="background:{bg};border:2px solid {border};border-radius:12px;padding:14px 18px;'
+        f'font-family:{ff};font-size:14px;line-height:1.55;color:#1d1d1f;">'
+        f'<p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.08em;'
+        f'text-transform:uppercase;color:{fg};">Kurzfazit{(" · " + esc(label)) if label else ""}</p>'
+        f'<p style="margin:0 0 4px;"><strong>Trump:</strong> {esc(said)}</p>'
+        f'<p style="margin:0 0 4px;"><strong>Basiswert:</strong> {esc(subj)}</p>'
+        f'<p style="margin:0;"><strong>Turbo:</strong> {esc(turbo)}</p>'
+        f'</div></td></tr>'
+    )
+    return text, box
+
+
 def analyze_and_alert(
     source:     str,
     published,
@@ -3840,10 +4175,42 @@ def analyze_and_alert(
     ticker:     str,
     url:        str,
     confidence: str = "hoch",
+    kind:       str | None = None,
+    name:       str | None = None,
+    hint_direction: str | None = None,
+    skip_macros: tuple = (),
 ):
-    # ── Priorität bestimmen (aus config.yml Watch-List) ──────────────────────
+    """
+    kind=None      → klassischer Pfad (News & Co.: Watchlist-Prioritäten, Haiku-Screen).
+    kind=NAMED     → Triage: Firma explizit genannt (auch Auslandswerte, Yahoo-Symbol
+                     in `ticker`, Firmenname in `name` für die onvista-Suche).
+    kind=SECTOR    → Triage: abgeleiteter Profiteur/Verlierer.
+    kind=MACRO     → Triage: Makro-Basiswert (DAX/SPX/NDX/EURUSD/GOLD/BRENT/WTI) ist das
+                     PRIMÄRE Subjekt (is_macro-Signal, kein Trump-Holdings-Block).
+    Triagierte Underlyings überspringen den Haiku-Pre-Screen (die Triage hat
+    entschieden); NAMED/MACRO umgehen außerdem das [unknown]+claude-Gate.
+    hint_direction: Richtungs-Hinweis der Triage (nur Prompt-Kontext, Sonnet entscheidet).
+    skip_macros: Makro-Codes, die für denselben Post separat analysiert werden →
+                 kein zusätzlicher MACRO_UNDERLYING-Anhang.
+    Gibt True (Mail gesendet) / False / None zurück.
+    """
     t_upper = ticker.upper()
-    if t_upper in WATCHLIST_HIGH:
+    is_macro = kind == "MACRO" and t_upper in turbo_selector.MACRO_UNDERLYINGS
+    macro_cfg_primary = turbo_selector.MACRO_UNDERLYINGS[t_upper] if is_macro else None
+    triaged = kind is not None
+    primary = kind in ("NAMED", "MACRO")          # direkte Aussage / Makro-Hauptsubjekt
+    truth_primary = primary and source == "Truth Social"
+    decision_hash = event_hash(ticker, raw_text)
+
+    def _terminal(reason: str) -> None:
+        """Ende ohne Alert: merken (nie wieder prüfen) + Outcome für den Digest."""
+        mark_decided(decision_hash, reason)
+        triage_set_outcome(raw_text, f"no_trade: {ticker} – {reason}")
+
+    # ── Priorität bestimmen (aus config.yml Watch-List) ──────────────────────
+    if is_macro:
+        priority = "macro"
+    elif t_upper in WATCHLIST_HIGH:
         priority = "high"
     elif t_upper in WATCHLIST_MEDIUM:
         priority = "medium"
@@ -3854,45 +4221,84 @@ def analyze_and_alert(
 
     # Low/Unknown-Priorität: Tier-3/Claude-Inferenz-Treffer verwerfen
     # Medium-Priorität mit claude-Konfidenz: durchlassen (z.B. FNMA/FMCC)
-    if priority in ("low", "unknown") and confidence in ("niedrig", "claude"):
+    # NAMED/MACRO aus der Triage (explizit genannt bzw. Makro-Hauptsubjekt)
+    # umgehen dieses Gate.
+    if priority in ("low", "unknown") and confidence in ("niedrig", "claude") and not primary:
         log.info(f"  ⏭️  {ticker} [{priority}] + {confidence} Konfidenz → übersprungen")
+        _terminal(f"[{priority}] + {confidence}-Konfidenz")
         return
 
     # ── Rate-Limit-Check (vor jeder weiteren Arbeit) ─────────────────────────
+    # Cooldown/Tages-Cap werden bewusst NICHT als terminal markiert → Retry.
     if not _rate_limit_ok(ticker):
         return
 
-    # ── Stufe 1: Haiku-Tradability-Screen (nur Medium/Low/Unknown) ───────────
-    if priority != "high" and not _haiku_tradeable(ticker, raw_text):
+    # ── Stufe 1: Haiku-Tradability-Screen (nur klassischer Pfad, Medium/Low/Unknown)
+    # Triagierte Underlyings hat die Triage bereits bewertet.
+    if not triaged and priority != "high" and not _haiku_tradeable(ticker, raw_text):
+        _terminal("Haiku-Screen NO_TRADE")
         return  # High-Priority-Ticker überspringen diesen Screen
 
-    holding_info = trump_holding_info(ticker)
-    holding_perf = trump_position_performance(ticker)
-    if holding_perf:
-        holding_info += f" | Performance seit Trump-Kauf: {holding_perf}"
+    if is_macro:
+        # Makro-Basiswert: Trump hält keinen Index/Rohstoff → kein Holdings-Block
+        holding_info = "N/A – Makro-Basiswert (Index/Rohstoff/Währung)"
+        holding_perf = ""
+    else:
+        holding_info = trump_holding_info(ticker)
+        holding_perf = trump_position_performance(ticker)
+        if holding_perf:
+            holding_info += f" | Performance seit Trump-Kauf: {holding_perf}"
 
     # ── Marktdaten erst NACH Haiku-Screen — spart ~70% der yfinance-Calls ────
     market_data  = fetch_market_data(ticker)
-    market_block = format_market_block(ticker)
+    market_block = format_market_block(ticker, is_macro)
+
+    # Anzeigename (Betreff/Kurzfazit/Prompt): "Bayer (BAYN.DE)", "Brent (BRENT)"
+    if is_macro:
+        _ml = macro_cfg_primary['label']
+        subject_label = _ml if _ml.upper() == t_upper else f"{_ml} ({ticker})"
+    elif name and name.upper().replace(" ", "") not in t_upper.replace(" ", ""):
+        subject_label = f"{name} ({ticker})"
+    else:
+        subject_label = ticker
 
     # Konfidenz-Beschreibung für Sonnet-Prompt
-    if confidence == "niedrig":
+    if is_macro:
+        conf_desc = (
+            f"MACRO — the statement concerns {macro_cfg_primary['label']} ({ticker}); "
+            f"this macro underlying is the PRIMARY subject, chosen by a triage step."
+        )
+    elif confidence == "niedrig":
         conf_desc = (
             f"LOW — {ticker} matched only via product/brand keyword, "
             f"not by ticker symbol or company name directly."
         )
-    elif confidence == "claude":
+    elif confidence == "claude" or kind == "SECTOR":
         conf_desc = (
-            f"CLAUDE-INFERRED — {ticker} not explicitly named in text; "
+            f"CLAUDE-INFERRED — {subject_label} not explicitly named in text; "
             f"Claude identified this company as likely affected."
         )
+    elif kind == "NAMED":
+        conf_desc = f"HIGH — {subject_label} is explicitly named in the text."
     else:
         conf_desc = "HIGH — ticker symbol or company name found directly in text."
+    if hint_direction in ("LONG", "SHORT"):
+        conf_desc += (f" Pre-screen expects {hint_direction} for {ticker} "
+                      f"(a hint only — decide independently).")
 
     price      = market_data.get("price", 0)
     chg_1d     = market_data.get("chg_1d", 0)
-    stop_long  = round(price * 0.92, 2) if price else 0
-    stop_short = round(price * 1.08, 2) if price else 0
+    stop_pct   = 3 if is_macro else 8      # Indizes/Rohstoffe schwanken weniger als Einzelaktien
+    stop_long  = round(price * (1 - stop_pct / 100), 2) if price else 0
+    stop_short = round(price * (1 + stop_pct / 100), 2) if price else 0
+    unit_txt   = price_unit(ticker, is_macro)
+    rel_choices = ("directly addressed / indirectly affected / tangentially mentioned" if is_macro
+                   else "directly named / sector-affected / tangentially mentioned")
+    company_line = (f"[Underlying name] ({ticker})" if is_macro
+                    else "[Full legal name] (" + ticker + ")")
+    macro_prompt_note = ("NONE (the primary subject already is the macro underlying — always write NONE)"
+                         if is_macro else
+                         "[DAX / SPX / NDX / EURUSD / GOLD / BRENT / WTI / NONE] — best broad underlying ALSO affected by this event, or NONE")
 
     # Dynamischer Teil des Prompts (variabel pro Call)
     dynamic_prompt = f"""SOURCE TEXT:
@@ -3900,7 +4306,7 @@ def analyze_and_alert(
 
 SOURCE: {source} | PUBLISHED: {published}
 
-MARKET DATA ({ticker}):
+MARKET DATA ({subject_label}):
 {market_block}
 
 DETECTION CONFIDENCE: {conf_desc}
@@ -3908,8 +4314,8 @@ TRUMP FINANCIAL INTEREST: {holding_info}
 
 ANALYSIS FORMAT — respond exactly:
 
-RELEVANCE: [YES / NO] — {ticker} is [directly named / sector-affected / tangentially mentioned]
-COMPANY: [Full legal name] ({ticker})
+RELEVANCE: [YES / NO] — {ticker} is [{rel_choices}]
+COMPANY: {company_line}
 EVENT_DATE: [YYYY-MM-DD of when the described event actually occurred, NOT the article publish date — if unknown write UNKNOWN]
 EVENT_SUMMARY: [One sentence: what Trump said/did]
 SENTIMENT: [BULLISH / BEARISH / NEUTRAL] for {ticker}
@@ -3920,14 +4326,14 @@ TIME_TO_IMPACT: [IMMEDIATE / SHORT 1-5 days / MEDIUM 1-4 weeks / UNCLEAR]
 TRUMP_CONFLICT_OF_INTEREST: [YES / NO / UNKNOWN]
 SUMMARY: [Max 2 sentences. Facts only.]
 TRADE_DIRECTION: [LONG / SHORT / NO_TRADE]
-TRADE_RATIONALE: [Evidence + price {price:.2f} in one sentence]
-STOP_LEVEL: [LONG: {stop_long:.2f} (−8%) / SHORT: {stop_short:.2f} (+8%) / N/A]
+TRADE_RATIONALE: [Evidence + price {price:.2f} {unit_txt} in one sentence]
+STOP_LEVEL: [LONG: {stop_long:.2f} (−{stop_pct}%) / SHORT: {stop_short:.2f} (+{stop_pct}%) / N/A]
 CONFIDENCE_SCORE: [HIGH / MEDIUM / LOW] — [limiting factor, max 5 words]
 HORIZON_DAYS: [3 / 5 / 7 / 10] — trading days over which EXPECTED_MOVE_PCT should play out
 EXPECTED_MOVE_PCT: [signed % move of {ticker} over HORIZON_DAYS, e.g. -3.5 or +6.0]
 SIGNAL_CONFIDENCE_PCT: [0-100] — numeric confidence in the direction+magnitude, independent of CONFIDENCE_SCORE
 UNCERTAINTY: [LOW / MEDIUM / HIGH] — how much this could go the other way
-MACRO_UNDERLYING: [DAX / SPX / NDX / EURUSD / GOLD / BRENT / WTI / NONE] — best broad underlying ALSO affected by this event, or NONE
+MACRO_UNDERLYING: {macro_prompt_note}
 MACRO_DIRECTION: [LONG / SHORT / NEUTRAL] for MACRO_UNDERLYING (N/A if NONE)
 MACRO_EXPECTED_MOVE_PCT: [signed % move of MACRO_UNDERLYING over HORIZON_DAYS — indices/FX/commodities move far less than single stocks; N/A if NONE]
 RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the source text]"""
@@ -3968,6 +4374,7 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
     first_line = alert_text.splitlines()[0].upper()
     if "RELEVANCE:" in first_line and "NO" in first_line:
         log.info(f"  ⏭️  {ticker} übersprungen – kein konkreter Unternehmensbezug")
+        _terminal("Sonnet: kein konkreter Bezug (RELEVANCE NO)")
         return
 
     # ── Trade-Richtung, Confidence, Magnitude aus Claude-Output ─────────────
@@ -3984,6 +4391,7 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
     macro_direction       = "NEUTRAL"
     macro_move_pct        = None
     rationale_line        = ""
+    event_summary         = ""
     for line in alert_text.splitlines():
         u = line.upper()
         if u.startswith("TRADE_DIRECTION:"):
@@ -4033,6 +4441,13 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
             else: macro_direction = "NEUTRAL"
         elif u.startswith("RATIONALE:"):
             rationale_line = line.split(":", 1)[1].strip() if ":" in line else ""
+        elif u.startswith("EVENT_SUMMARY:"):
+            event_summary = line.split(":", 1)[1].strip() if ":" in line else ""
+
+    # Makro-Anhang: nie für das Primärsubjekt selbst und nicht für Makros, die
+    # für denselben Post bereits separat analysiert werden.
+    if is_macro or macro_underlying == t_upper or macro_underlying in skip_macros:
+        macro_underlying = "NONE"
 
     # ── Stale-Event-Gate: kein Trade wenn Event > 7 Tage alt ─────────────────
     if event_date_str and event_date_str.upper() != "UNKNOWN":
@@ -4051,11 +4466,14 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
             pass
 
     # ── Schwellenwert-Gate (aus config.yml) ───────────────────────────────────
-    if not confidence_ok(conf_score):
-        log.info(f"  ⏭️  {ticker} Konfidenz {conf_score} < {MIN_CONFIDENCE} → kein Alert")
+    if not confidence_ok(conf_score, truth_primary):
+        need = MIN_CONFIDENCE_TRUTH if truth_primary else MIN_CONFIDENCE
+        log.info(f"  ⏭️  {ticker} Konfidenz {conf_score} < {need} → kein Alert")
+        _terminal(f"Konfidenz {conf_score} < {need}")
         return
     if not magnitude_ok(magnitude):
         log.info(f"  ⏭️  {ticker} Magnitude {magnitude} < {MIN_MAGNITUDE} → kein Alert")
+        _terminal(f"Magnitude {magnitude} < {MIN_MAGNITUDE}")
         return
 
     # ── Turbo-Empfehlung ─────────────────────────────────────────────────────
@@ -4065,6 +4483,7 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
     # NUR als Fallback falls der Selector eine Exception wirft.
     turbo_dir        = "UNKLAR" if direction == "NO_TRADE" else direction
     turbo_selector_decision = None
+    sel_result       = None
     turbo_post_hash  = event_hash(ticker, raw_text)
     try:
         if turbo_dir not in ("LONG", "SHORT"):
@@ -4072,13 +4491,17 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
         post_dt = _parse_post_time(published)
         stock_signal = turbo_selector.MarketSignal(
             underlying=ticker,
-            yf_symbol=turbo_selector.YF_TICKER_MAP.get(t_upper, t_upper),
+            yf_symbol=(macro_cfg_primary["yf"] if is_macro
+                       else turbo_selector.YF_TICKER_MAP.get(t_upper, t_upper)),
             direction=turbo_dir,
             confidence=max(0.0, min(1.0, signal_confidence_pct / 100.0)),
             expected_return=expected_move_pct / 100.0,
             horizon_days=horizon_days,
             rationale=rationale_line or alert_text.splitlines()[0][:160],
             uncertainty=uncertainty,
+            is_macro=is_macro,
+            macro_label=macro_cfg_primary["label"] if is_macro else None,
+            name=None if is_macro else name,
         )
         sel_result = turbo_selector.select_turbo(
             stock_signal, post_dt, conn=conn,
@@ -4112,7 +4535,12 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
                                macro_result.text)
     except Exception as e:
         log.warning(f"  ⚠️  Turbo-Selector Fehler ({ticker}): {e} — Fallback auf turbo_recommendation()")
-        turbo_block = turbo_recommendation(ticker, turbo_dir)
+        sel_result = None
+        try:
+            turbo_block = turbo_recommendation(ticker, turbo_dir)
+        except Exception as e2:
+            log.warning(f"  ⚠️  turbo_recommendation Fehler ({ticker}): {e2}")
+            turbo_block = "Turbo-Empfehlung nicht verfügbar."
         turbo_selector_decision = None
 
     # URLs im Turbo-Block klickbar machen (Text bleibt sonst unverändert)
@@ -4139,9 +4567,11 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
     # Gate weiter unten, das sich auf TRADE_DIRECTION bezieht — hier geht es
     # um den Fall, dass Sonnet LONG/SHORT sagt, der Selector aber z.B. "bereits
     # eingepreist" oder "kein Produkt mit positivem EV" befindet) ────────────
-    if turbo_selector_decision == "NO_TRADE" and not TURBO_SELECTOR_CFG.get("send_no_trade_alerts", True):
+    if turbo_selector_decision == "NO_TRADE" and not TURBO_SELECTOR_CFG.get("send_no_trade_alerts", False):
         log.info(f"  ⏭️  {ticker} Turbo-Selector NO_TRADE → kein Alert "
                 "(config: turbo_selector.send_no_trade_alerts=false)")
+        triage_set_outcome(raw_text, f"no_trade: {subject_label} {direction} – "
+                                     f"Selector: {sel_result.reason if sel_result else 'NO_TRADE'}")
         return False
 
     # ── Konfidenz-Badge ──────────────────────────────────────────────────────
@@ -4180,6 +4610,12 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
 
     analysis_html = _render_analysis(alert_text)
 
+    # ── Kurzfazit-Box (ganz oben in der Mail) ────────────────────────────────
+    kurz_text, kurz_html = build_kurzfazit(
+        event_summary, subject_label, direction, horizon_days, expected_move_pct,
+        turbo_selector_decision, sel_result, raw_text,
+    )
+
     # ── Trump-Positions-Box (nur wenn Trump die Aktie selbst hält) ───────────
     perf_box = ""
     if holding_perf:
@@ -4190,6 +4626,22 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
          font-size:13px;line-height:1.5;color:#92400e;">
         💼 <strong>Trump hält {ticker}</strong> &nbsp;·&nbsp; {holding_perf}
       </p>
+    </div>
+  </td></tr>"""
+    if is_macro:
+        holdings_section = ""   # Makro-Basiswert: Trump-Positionen irrelevant
+    else:
+        holdings_section = f"""  <!-- TRUMP POSITIONEN -->
+  <tr><td style="background:#ffffff;padding:0 32px;">
+    <div style="border-top:1px solid #e5e5ea;"></div>
+  </td></tr>
+  <tr><td style="background:#ffffff;padding:20px 32px 24px;">
+    <p style="margin:0 0 12px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
+       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
+      Trumps bekannte Positionen
+    </p>
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;">
+      {holdings_html_block()}
     </div>
   </td></tr>"""
     html_body = f"""<!DOCTYPE html>
@@ -4211,13 +4663,16 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
     </p>
     <h1 style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',Helvetica,Arial,sans-serif;
        font-size:26px;font-weight:700;color:#f5f5f7;letter-spacing:-0.02em;">
-      {ticker}
+      {html.escape(subject_label)}
     </h1>
     <p style="margin:8px 0 0 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
        font-size:13px;color:#6e6e73;">
       {source} &nbsp;·&nbsp; {published}
     </p>
   </td></tr>
+
+  <!-- KURZFAZIT -->
+  {kurz_html}
 
   <!-- BADGE (nur bei niedrig/claude) -->
   {"" if not badge.strip() else f'<tr><td style="background:#ffffff;padding:16px 32px 0;">' + badge + "</td></tr>"}
@@ -4283,19 +4738,7 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
     </div>
   </td></tr>
 
-  <!-- TRUMP POSITIONEN -->
-  <tr><td style="background:#ffffff;padding:0 32px;">
-    <div style="border-top:1px solid #e5e5ea;"></div>
-  </td></tr>
-  <tr><td style="background:#ffffff;padding:20px 32px 24px;">
-    <p style="margin:0 0 12px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;
-       font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6e6e73;text-transform:uppercase;">
-      Trumps bekannte Positionen
-    </p>
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;">
-      {holdings_html_block()}
-    </div>
-  </td></tr>
+{holdings_section}
 
   <!-- FOOTER -->
   <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:20px 32px;
@@ -4316,21 +4759,23 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
 """
     if direction == "NO_TRADE" and not SEND_NO_TRADE:
         log.info(f"  ⏭️  {ticker} NO_TRADE → kein Alert (config: send_no_trade=false)")
+        triage_set_outcome(raw_text, f"no_trade: {subject_label} – Sonnet: kein Handelssignal")
         return False  # analysiert, aber keine E-Mail
 
     dir_emoji = {"LONG": "📈", "SHORT": "📉"}.get(direction, "❓")
-    conf_tag  = {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
+    conf_tag  = "" if primary else {"niedrig": " ⚠️", "claude": " 🤖"}.get(confidence, "")
     hold_tag  = " 💼" if holding_perf else ""  # Trump hält diese Aktie selbst
-    # Turbo-Selector-Entscheidung sichtbar im Betreff, falls sie vom
-    # allgemeinen TRADE_DIRECTION-Ergebnis abweicht (z.B. LONG-Signal, aber
-    # Turbo-Selector sagt "bereits eingepreist" → NO TRADE)
-    turbo_tag = ""
-    if turbo_selector_decision == "NO_TRADE" and direction != "NO_TRADE":
-        turbo_tag = " · NO TRADE (Turbo)"
-    subject   = f"{dir_emoji} Trump-Impact – {ticker}{conf_tag}{hold_tag} [{direction}]{turbo_tag} – {source}"
+    # Selector-Entscheidung (ACTIONABLE / WATCH / NO TRADE) steht im Betreff:
+    # "📈 Trump-Impact – Bayer (BAYN.DE) [LONG · ACTIONABLE] – Truth Social"
+    status = decision_label(turbo_selector_decision, direction)
+    dir_part = f"{direction} · {status}" if status else direction
+    subject   = f"{dir_emoji} Trump-Impact – {subject_label}{conf_tag}{hold_tag} [{dir_part}] – {source}"
     sent = send_gmail(subject, html_body)
     if sent:
-        log.info(f"  🎯 Alert gesendet: {ticker} | {direction} | {source}")
+        log.info(f"  🎯 Alert gesendet: {ticker} | {direction} | {status or '-'} | {source}")
+        triage_set_outcome(raw_text, f"alert_sent:{subject_label} {direction} {status or ''}".strip())
+    else:
+        triage_set_outcome(raw_text, f"alert_failed:{subject_label} {direction} {status or ''}".strip())
     return sent
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4506,13 +4951,40 @@ def main():
             return True
         return False
 
-    def _run_analysis(source, ts, text, ticker, url, confidence):
+    def _run_analysis(source, ts, text, ticker, url, confidence, **kw):
         nonlocal processed, emails_sent
         processed += 1
-        sent = bool(analyze_and_alert(source, ts, text, ticker, url, confidence))
+        sent = bool(analyze_and_alert(source, ts, text, ticker, url, confidence, **kw))
         if sent:
             emails_sent += 1
         analyzed_log.append({"ticker": ticker, "source": source, "sent": sent})
+
+    def _run_triaged(source, ts, text, url) -> tuple[str, int, int]:
+        """Statement-first: EIN Haiku-Call je Post (gecacht), dann Analyse der
+        gewählten Underlyings. Rückgabe: (status, analysiert, bereits_entschieden)
+        mit status = 'fail' (API-Fehler, nächste Runde erneut) | 'irrelevant' | 'relevant'."""
+        tri = triage_post(source, url, text)
+        if tri is None:
+            return "fail", 0, 0
+        if not tri["relevant"]:
+            return "irrelevant", 0, 0
+        unders = pick_underlyings(tri["underlyings"], MAX_TICKERS_PER_ART)
+        macros_here = tuple(u["symbol"] for u in unders if u["kind"] == "MACRO")
+        analysed = seen = 0
+        for u in unders:
+            if _cap_reached():
+                break
+            if already_handled(event_hash(u["symbol"], text)):
+                seen += 1
+                continue
+            analysed += 1
+            _run_analysis(
+                source, ts, text, u["symbol"], url,
+                "claude" if u["kind"] == "SECTOR" else "hoch",
+                kind=u["kind"], name=u.get("name") or None,
+                hint_direction=u.get("direction"), skip_macros=macros_here,
+            )
+        return "relevant", analysed, seen
 
     def _sorted_tickers(tickers: list) -> list:
         """Sortiert hoch vor niedrig/claude, begrenzt auf MAX_TICKERS_PER_ART."""
@@ -4522,7 +4994,7 @@ def main():
 
     # ── Truth Social ──────────────────────────────────────────────────────────
     log.info("📡 Truth Social …")
-    ts_fetched, ts_recent, ts_relevant, ts_with_tickers, ts_analysed, ts_seen = 0, 0, 0, 0, 0, 0
+    ts_fetched, ts_recent, ts_triaged, ts_relevant, ts_fail, ts_analysed, ts_seen = 0, 0, 0, 0, 0, 0, 0
     for post in (fetch_truth_social() if SRC_TRUTH else []):
         ts_fetched += 1
         if _cap_reached():
@@ -4536,25 +5008,18 @@ def main():
         if not is_recent(ts):
             continue
         ts_recent += 1
-        if not is_financially_relevant(text, truth_social=True):
-            continue
-        ts_relevant += 1
-        tickers = find_all_tickers(text)
-        if not tickers:
-            tickers = _sector_tickers_once(text)   # Sektor-Inferenz als Fallback
-        if not tickers:
-            continue
-        ts_with_tickers += 1
+        # Statement-first: kein Keyword-Gate — die Triage entscheidet (≤ ~25 Posts/Tag).
         post_url = post.get("url", post.get("uri", "https://truthsocial.com/@realDonaldTrump"))
-        for ticker, confidence in _sorted_tickers(tickers):
-            if _cap_reached():
-                break
-            if already_seen(event_hash(ticker, text)):
-                ts_seen += 1
-                continue
-            ts_analysed += 1
-            _run_analysis("Truth Social", ts, text, ticker, post_url, confidence)
-    log.info(f"  Truth-Trichter: {ts_fetched} geholt → {ts_recent} im Zeitfenster → {ts_relevant} relevant → {ts_with_tickers} mit Ticker → {ts_analysed} analysiert ({ts_seen} bereits gesehen)")
+        status, n_an, n_seen = _run_triaged("Truth Social", ts, text, post_url)
+        ts_analysed += n_an
+        ts_seen += n_seen
+        if status == "fail":
+            ts_fail += 1
+            continue
+        ts_triaged += 1
+        if status == "relevant":
+            ts_relevant += 1
+    log.info(f"  Truth-Trichter: {ts_fetched} geholt → {ts_recent} im Zeitfenster → {ts_triaged} triagiert → {ts_relevant} relevant → {ts_analysed} analysiert ({ts_seen} bereits entschieden, {ts_fail} Triage-Fehler)")
 
     # ── News-RSS (Google News + Finanz-Feeds) ────────────────────────────────
     log.info("\n📰 Nachrichten-RSS …")
@@ -4591,7 +5056,7 @@ def main():
         for ticker, confidence in _sorted_tickers(tickers):
             if _cap_reached():
                 break
-            if already_seen(event_hash(ticker, text)):
+            if already_handled(event_hash(ticker, text)):
                 rss_seen += 1
                 continue
             rss_analysed += 1
@@ -4604,6 +5069,7 @@ def main():
 
     # ── White House RSS ───────────────────────────────────────────────────────
     log.info("\n🏛️  White House RSS …")
+    wh_recent = wh_relevant = wh_analysed = 0
     for entry in (fetch_whitehouse() if SRC_WHITEHOUSE else []):
         if _cap_reached():
             break
@@ -4613,26 +5079,17 @@ def main():
         ts = entry.get("published_parsed") or entry.get("updated_parsed")
         if not is_recent(ts):
             continue
-        if not is_financially_relevant(text):
-            continue
-        tickers = find_all_tickers(text)
-        if not tickers:
-            tickers = _sector_tickers_once(text)
-        if not tickers:
-            continue
-        for ticker, confidence in _sorted_tickers(tickers):
-            if _cap_reached():
-                break
-            if already_seen(event_hash(ticker, text)):
-                continue
-            _run_analysis(
-                "White House", entry.get("published", ""),
-                text, ticker,
-                entry.get("link", "https://www.whitehouse.gov"), confidence,
-            )
+        wh_recent += 1
+        status, n_an, _ = _run_triaged(
+            "White House", entry.get("published", ""), text,
+            entry.get("link", "https://www.whitehouse.gov"))
+        wh_analysed += n_an
+        wh_relevant += status == "relevant"
+    log.info(f"  White-House-Trichter: {wh_recent} im Zeitfenster → {wh_relevant} relevant → {wh_analysed} analysiert")
 
     # ── Federal Register (Executive Orders, Proklamationen) ──────────────────
     log.info("\n📜 Federal Register …")
+    fr_recent = fr_relevant = fr_analysed = 0
     for doc in (fetch_federal_register() if SRC_FEDREGISTER else []):
         if _cap_reached():
             break
@@ -4648,23 +5105,11 @@ def main():
             continue
         if not is_recent(doc.get("publishedAt")):
             continue
-        # EOs haben oft keine Finanz-Schlagworte und keinen direkten Ticker →
-        # Sektor-Inferenz auch ohne is_financially_relevant, aber je Dokument
-        # nur einmal über alle Läufe (monitor_state-Guard).
-        tickers = find_all_tickers(text) if is_financially_relevant(text) else []
-        if not tickers:
-            tickers = _sector_tickers_once(text)
-        if not tickers:
-            continue
-        for ticker, confidence in _sorted_tickers(tickers):
-            if _cap_reached():
-                break
-            if already_seen(event_hash(ticker, text)):
-                continue
-            _run_analysis(
-                "Federal Register", doc.get("publishedAt", ""),
-                text, ticker, doc_url, confidence,
-            )
+        fr_recent += 1
+        status, n_an, _ = _run_triaged("Federal Register", doc.get("publishedAt", ""), text, doc_url)
+        fr_analysed += n_an
+        fr_relevant += status == "relevant"
+    log.info(f"  Federal-Register-Trichter: {fr_recent} im Zeitfenster → {fr_relevant} relevant → {fr_analysed} analysiert")
 
     if SRC_EDGAR:
         check_edgar_alerts()
@@ -4695,79 +5140,119 @@ def main():
         log.warning(f"  ⚠️  WAL-Checkpoint fehlgeschlagen: {e}")
 
 
+def _fmt_digest_outcome(outcome: str | None) -> str:
+    """post_triage.outcome ('alert_sent:… | no_trade: …') → kurzer Digest-Text."""
+    if not outcome or not outcome.strip():
+        return "noch nicht analysiert (Cooldown/Tageslimit)"
+    parts = []
+    for p in outcome.split(" | "):
+        p = p.strip()
+        if p.startswith("alert_sent:"):
+            parts.append("✅ Alert gesendet: " + p[len("alert_sent:"):].strip())
+        elif p.startswith("alert_failed:"):
+            parts.append("⚠️ Alert-Mail fehlgeschlagen: " + p[len("alert_failed:"):].strip())
+        elif p.startswith("no_trade:"):
+            parts.append("NO TRADE – " + p[len("no_trade:"):].strip())
+        else:
+            parts.append(p)
+    return "; ".join(parts)
+
+
+def build_digest(rows: list[tuple], today: str) -> tuple[str, str] | None:
+    """Tages-Digest aus post_triage-Zeilen (created_at, source, text,
+    underlyings_json, outcome, reason) der als relevant triagierten Aussagen.
+    Keine Zeilen → None (dann wird gar keine Mail gesendet)."""
+    if not rows:
+        return None
+    esc = html.escape
+    body_rows = []
+    for created_at, source, text, unders_json, outcome, reason in rows:
+        try:
+            unders = json.loads(unders_json or "[]")
+        except Exception:
+            unders = []
+        und_txt = ", ".join(
+            f"{u.get('name') or u['symbol']} ({u['symbol']}) {u.get('direction') or ''}".strip()
+            for u in unders) or "–"
+        snippet = (text or "").strip().replace("\n", " ")
+        snippet = snippet[:140] + ("…" if len(snippet) > 140 else "")
+        hhmm = (created_at or "")[11:16]
+        body_rows.append(
+            f'<tr>'
+            f'<td style="padding:8px 10px 8px 0;font-size:12px;color:#6e6e73;vertical-align:top;white-space:nowrap;">{esc(hhmm)}</td>'
+            f'<td style="padding:8px 10px 8px 0;font-size:12px;vertical-align:top;">{esc(snippet)}'
+            f'<br><span style="color:#6e6e73;">{esc(source or "")} · {esc(reason or "")}</span></td>'
+            f'<td style="padding:8px 10px 8px 0;font-size:12px;vertical-align:top;">{esc(und_txt)}</td>'
+            f'<td style="padding:8px 0;font-size:12px;vertical-align:top;">{esc(_fmt_digest_outcome(outcome))}</td>'
+            f'</tr>'
+        )
+    n_sent = sum(1 for r in rows if r[4] and "alert_sent:" in r[4])
+    th = 'style="padding:4px 10px 6px 0;font-size:11px;color:#6e6e73;text-align:left;text-transform:uppercase;letter-spacing:.06em;"'
+    html_body = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
+<body style="background:#f5f5f7;margin:0;padding:32px 0;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Helvetica,Arial,sans-serif;">
+<table width="680" cellpadding="0" cellspacing="0" style="margin:0 auto;max-width:680px;">
+  <tr><td style="background:#1d1d1f;border-radius:16px 16px 0 0;padding:24px 32px;">
+    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#6e6e73;text-transform:uppercase;letter-spacing:.08em;">
+      Trump Impact Monitor · Tages-Digest
+    </p>
+    <h1 style="margin:0;font-size:20px;font-weight:700;color:#f5f5f7;">
+      {len(rows)} marktrelevante Aussage(n) heute · {n_sent} Alert(s)
+    </h1>
+    <p style="margin:6px 0 0;font-size:12px;color:#6e6e73;">{esc(today)}</p>
+  </td></tr>
+  <tr><td style="background:#fff;padding:20px 32px 24px;">
+    <table style="border-collapse:collapse;width:100%;">
+      <tr><th {th}>Zeit (UTC)</th><th {th}>Aussage</th><th {th}>Basiswert</th><th {th}>Ergebnis</th></tr>
+      {"".join(body_rows)}
+    </table>
+  </td></tr>
+  <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:12px 32px;border-top:1px solid #e5e5ea;">
+    <p style="margin:0;font-size:11px;color:#9ca3af;">NO TRADE = Aussage analysiert, aber kein Produkt/Signal empfehlenswert.</p>
+  </td></tr>
+</table></body></html>"""
+    subject = f"📊 Trump Monitor – Tages-Digest ({today}): {len(rows)} relevante Aussage(n), {n_sent} Alert(s)"
+    return subject, html_body
+
+
 def _maybe_send_daily_summary(analyzed_log: list[dict], emails_sent: int) -> None:
     """
-    Schickt einmal täglich (UTC 20:00-21:00) eine Summary-E-Mail wenn
-    in diesem Run keine Alerts verschickt wurden — damit du weißt dass
-    das System aktiv ist und was analysiert wurde.
+    Tages-Digest: höchstens eine Mail pro Tag im Abend-Fenster (UTC 20:00-21:00),
+    NUR wenn heute mindestens eine als marktrelevant triagierte Aussage
+    vorlag (post_triage.relevant=1). Inhalt: Uhrzeit, Aussage, Basiswert +
+    Richtung, Ergebnis (Alert gesendet / NO TRADE + Grund). Keine relevante
+    Aussage → keine Mail. Abschaltbar: alerts.daily_digest=false.
     """
+    if not DAILY_DIGEST:
+        return
     now = now_utc()
-    # Nur im Abend-Run (20-21 UTC) und nur wenn keine Alerts heute
     if not (20 <= now.hour < 21):
         return
     today = now.strftime("%Y-%m-%d")
-    # Prüfen ob heute schon eine Summary geschickt wurde
     sent_today = conn.execute(
         "SELECT 1 FROM events WHERE source='DAILY_SUMMARY' AND DATE(processed_at)=?",
         (today,)
     ).fetchone()
     if sent_today:
         return
-    # Nur senden wenn heute keine Alert-E-Mails rausgingen
-    alerts_today = conn.execute(
-        "SELECT COUNT(*) FROM events WHERE source != 'DAILY_SUMMARY' AND DATE(processed_at)=?",
-        (today,)
-    ).fetchone()[0]
-    if alerts_today > 0:
+    rows = conn.execute(
+        "SELECT created_at, source, text, underlyings, outcome, reason FROM post_triage "
+        "WHERE relevant=1 AND DATE(created_at)=? ORDER BY created_at",
+        (today,),
+    ).fetchall()
+    digest = build_digest(rows, today)
+    if digest is None:
+        log.info("  📊 Kein Digest: heute keine marktrelevante Aussage")
         return
-
-    # Summary bauen
-    analyzed_tickers = [e["ticker"] for e in analyzed_log if not e["sent"]]
-    ticker_counts: dict = {}
-    for t in analyzed_tickers:
-        ticker_counts[t] = ticker_counts.get(t, 0) + 1
-    top = sorted(ticker_counts.items(), key=lambda x: -x[1])[:10]
-
-    rows_html = "".join(
-        f'<tr><td style="padding:4px 12px 4px 0;font-size:12px;font-weight:600;">{t}</td>'
-        f'<td style="padding:4px 0;font-size:12px;color:#6e6e73;">{n}× analysiert — kein Signal</td></tr>'
-        for t, n in top
-    ) or '<tr><td colspan="2" style="padding:8px 0;font-size:12px;color:#9ca3af;">Keine Analysen heute</td></tr>'
-
-    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
-<body style="background:#f5f5f7;margin:0;padding:32px 0;">
-<table width="600" cellpadding="0" cellspacing="0" style="margin:0 auto;max-width:600px;">
-  <tr><td style="background:#1d1d1f;border-radius:16px 16px 0 0;padding:24px 32px;">
-    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#6e6e73;text-transform:uppercase;letter-spacing:.08em;">
-      Trump Impact Monitor · Tages-Summary
-    </p>
-    <h1 style="margin:0;font-size:20px;font-weight:700;color:#f5f5f7;">
-      Heute keine Kauf-/Verkaufs-Signale
-    </h1>
-    <p style="margin:6px 0 0;font-size:12px;color:#6e6e73;">{today} · {len(analyzed_log)} Events analysiert · 0 Alerts</p>
-  </td></tr>
-  <tr><td style="background:#fff;padding:20px 32px 24px;">
-    <p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#6e6e73;text-transform:uppercase;letter-spacing:.06em;">
-      Analysierte Ticker (kein actionable Signal)
-    </p>
-    <table style="border-collapse:collapse;width:100%;">{rows_html}</table>
-    <p style="margin:16px 0 0;font-size:11px;color:#9ca3af;">
-      Das System läuft normal. Du erhältst eine E-Mail sobald ein konkretes Signal erkannt wird.
-    </p>
-  </td></tr>
-  <tr><td style="background:#f5f5f7;border-radius:0 0 16px 16px;padding:12px 32px;border-top:1px solid #e5e5ea;">
-    <p style="margin:0;font-size:11px;color:#9ca3af;">{now.strftime('%Y-%m-%d %H:%M UTC')}</p>
-  </td></tr>
-</table></body></html>"""
-
-    send_gmail(f"📊 Trump Monitor – Kein Signal heute ({today})", html)
+    subject, body = digest
+    if not send_gmail(subject, body):
+        return  # nächster Lauf im Fenster versucht es erneut
     # Als Sentinel in DB speichern
     conn.execute(
         "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?)",
         (f"daily-summary-{today}", "DAILY_SUMMARY", today, "", f"daily-summary-{today}", "", now.isoformat()),
     )
     conn.commit()
-    log.info("  📊 Tages-Summary verschickt")
+    log.info("  📊 Tages-Digest verschickt")
 
 
 if __name__ == "__main__":

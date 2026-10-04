@@ -16,6 +16,9 @@ WATCHLIST_ALL    = WATCHLIST_HIGH | WATCHLIST_MEDIUM | WATCHLIST_LOW
 # Schwellenwerte
 MIN_CONFIDENCE   = _CFG["thresholds"]["min_confidence_score"]   # HIGH/MEDIUM/LOW
 MIN_MAGNITUDE    = _CFG["thresholds"]["min_magnitude"]           # SMALL/MEDIUM/LARGE
+# Schwelle für Truth-Social-Items der Art NAMED/MACRO (Primärquelle); fehlt der
+# Key, gilt min_confidence_score.
+MIN_CONFIDENCE_TRUTH = _CFG["thresholds"].get("truth_min_confidence", MIN_CONFIDENCE)
 MAX_ALERTS       = _CFG["thresholds"]["max_alerts_per_run"]
 LOOKBACK_HOURS   = _CFG["thresholds"]["lookback_hours"]
 
@@ -30,6 +33,7 @@ SRC_OGE          = _CFG["sources"]["oge_monitor"]
 # Alert-Verhalten
 SEND_NO_TRADE    = _CFG["alerts"]["send_no_trade"]
 INCLUDE_RETWEETS = _CFG["alerts"]["include_retweets"]
+DAILY_DIGEST     = bool(_CFG["alerts"].get("daily_digest", True))
 
 # Turbo Selector ("Trump Post → Turbo Selector DE") — komplette Sub-Config
 # wird 1:1 durchgereicht, siehe turbo_selector.py für die Verwendung.
@@ -39,9 +43,11 @@ TURBO_SELECTOR_CFG = _CFG.get("turbo_selector", {})
 _CONF_RANK  = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
 _MAG_RANK   = {"SMALL": 0, "MEDIUM": 1, "LARGE": 2}
 
-def confidence_ok(score: str) -> bool:
-    """True wenn CONFIDENCE_SCORE >= MIN_CONFIDENCE."""
-    return _CONF_RANK.get(score.upper(), 0) >= _CONF_RANK.get(MIN_CONFIDENCE, 0)
+def confidence_ok(score: str, truth_primary: bool = False) -> bool:
+    """True wenn CONFIDENCE_SCORE >= MIN_CONFIDENCE (bzw. MIN_CONFIDENCE_TRUTH
+    bei Truth-Social-Items der Art NAMED/MACRO)."""
+    need = MIN_CONFIDENCE_TRUTH if truth_primary else MIN_CONFIDENCE
+    return _CONF_RANK.get(score.upper(), 0) >= _CONF_RANK.get(need, 0)
 
 def magnitude_ok(mag: str) -> bool:
     """True wenn MAGNITUDE_ESTIMATE >= MIN_MAGNITUDE."""

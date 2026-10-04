@@ -115,6 +115,7 @@ class MarketSignal:
     volatility: float | None = None    # annualisiert, wird bei Bedarf aus Historie nachgefüllt
     is_macro: bool = False
     macro_label: str | None = None
+    name: str | None = None            # Firmenname (Triage) — Hinweis für die onvista-Suche
 
 
 @dataclass
@@ -319,45 +320,86 @@ def spot_price(yf_sym: str) -> float | None:
 ONVISTA_FINDER_API = "https://api.onvista.de/api/v1/derivatives/finder/configuration_query"
 ONVISTA_INSTRUMENTS_API = "https://api.onvista.de/api/v1/instruments/query"
 
-_ENTITY_CACHE: dict[str, tuple | None] = {}
+_ENTITY_CACHE: dict[tuple, tuple | None] = {}
 
 
-def resolve_onvista_entity(underlying: str) -> tuple[str, str] | None:
+def _first_word(name: str) -> str:
+    m = re.search(r"[A-Za-z0-9ÄÖÜäöüß&]+", name or "")
+    return m.group(0).lower() if m else ""
+
+
+def onvista_search_terms(underlying: str, name: str | None = None) -> list[str]:
+    """Suchbegriffe für die onvista-Instrumentensuche, in Probier-Reihenfolge.
+    US-Ticker: Ticker, [Name-Hinweis], Firmenname aus entities.json.
+    Fremd-Symbole (BAYN.DE, SAP.DE, 005930.KS): der Yahoo-Suffix ist für
+    onvista nutzlos → zuerst der Firmenname (Hinweis aus der Triage), dann das
+    Basis-Kürzel (BAYN)."""
+    u = underlying.upper()
+    foreign = "." in u or u.startswith("^")
+    base = u.split(".")[0] if "." in u else u
+    company = (ENTITIES.get(u, {}).get("company") or [None])[0]
+    terms: list[str] = []
+    if foreign:
+        terms += [name, base, company]
+    else:
+        terms += [u, name, company]
+    out: list[str] = []
+    for t in terms:
+        if t and t.strip() and t.strip().lower() not in {x.lower() for x in out}:
+            out.append(t.strip())
+    return out
+
+
+def pick_onvista_stock(items: list[dict], term: str, underlying: str,
+                       name: str | None = None) -> str | None:
+    """Reine Auswahl-Logik: entityValue der passenden STOCK-Zeile oder None.
+    - Symbol-Treffer (homeSymbol == Ticker bzw. Basis-Kürzel) gewinnt immer.
+    - Name-Hinweis: nur Aktien, deren Name mit dem ersten Wort des Hinweises
+      beginnt (verhindert 'Bayer' → 'BMW' o.ä.).
+    - Firmennamen-Alias aus entities.json: wie bisher erste Aktie der Trefferliste."""
+    u = underlying.upper()
+    base = u.split(".")[0] if "." in u else u
+    stocks = [i for i in items if i.get("entityType") == "STOCK" and i.get("entityValue")]
+    for i in stocks:
+        sym = (i.get("homeSymbol") or i.get("symbol") or "").upper()
+        if sym and sym in (u, base):
+            return i["entityValue"]
+    if term.upper() in (u, base):
+        return None
+    if name and term.lower() == name.strip().lower():
+        w = _first_word(name)
+        for i in stocks:
+            if w and _first_word(i.get("name", "")) == w:
+                return i["entityValue"]
+        return None
+    return stocks[0]["entityValue"] if stocks else None
+
+
+def resolve_onvista_entity(underlying: str, name: str | None = None) -> tuple[str, str] | None:
     """(entityType, entityValue) für die onvista-Finder-API. Makro-Basiswerte
     sind fest verdrahtet (live verifiziert), Aktien werden per Ticker/Firmenname
-    über die öffentliche Such-API aufgelöst (analog main.py
-    _onvista_underlying_entity)."""
+    (optional Name-Hinweis aus der Triage, wichtig für Auslandswerte wie
+    BAYN.DE) über die öffentliche Such-API aufgelöst."""
     u = underlying.upper()
     if u in MACRO_UNDERLYINGS:
         return MACRO_UNDERLYINGS[u]["onvista"]
-    if u in _ENTITY_CACHE:
-        return _ENTITY_CACHE[u]
-
-    terms = [u]
-    company = (ENTITIES.get(u, {}).get("company") or [None])[0]
-    if company:
-        terms.append(company)
+    key = (u, (name or "").lower())
+    if key in _ENTITY_CACHE:
+        return _ENTITY_CACHE[key]
 
     result = None
-    for term in terms:
+    for term in onvista_search_terms(u, name):
         try:
             r = requests.get(ONVISTA_INSTRUMENTS_API, params={"searchValue": term},
                               headers={"User-Agent": FEED_AGENT}, timeout=10)
             r.raise_for_status()
-            for item in r.json().get("list", []):
-                if item.get("entityType") != "STOCK":
-                    continue
-                sym = (item.get("homeSymbol") or item.get("symbol") or "").upper()
-                if sym == u or term != u:
-                    ev = item.get("entityValue")
-                    if ev:
-                        result = ("STOCK", ev)
-                    break
-            if result:
+            ev = pick_onvista_stock(r.json().get("list", []), term, u, name)
+            if ev:
+                result = ("STOCK", ev)
                 break
         except Exception as e:
             log.warning(f"  ⚠️  onvista Entity-Suche ({term}): {e}")
-    _ENTITY_CACHE[u] = result
+    _ENTITY_CACHE[key] = result
     return result
 
 
@@ -405,7 +447,8 @@ _ONVISTA_LEVERAGE_BANDS = [(2, 4), (4, 6), (6, 8), (8, 10), (10, 13), (13, 16), 
 
 
 def fetch_products_onvista(underlying: str, direction: str,
-                           per_page: int = 100, max_leverage: float | None = None) -> list[Product]:
+                           per_page: int = 100, max_leverage: float | None = None,
+                           name: str | None = None) -> list[Product]:
     """Open-End-Knock-Outs für einen Basiswert/Richtung über alle Emittenten
     (die onvista-API aggregiert SG/Goldman/JPM/BNP/HSBC/Morgan Stanley/UBS/
     UniCredit/Vontobel/... hinter einem Call).
@@ -414,7 +457,7 @@ def fetch_products_onvista(underlying: str, direction: str,
     Papiere, die ersten Seiten sind dann nur KO-nahe 200-800x-Turbos. Deshalb
     serverseitig openEnded=1 + gearingAskRange je Hebel-Band, eine Seite pro
     Band, danach Dedup per ISIN → ganzes sinnvolles Hebel-Spektrum abgedeckt."""
-    entity = resolve_onvista_entity(underlying)
+    entity = resolve_onvista_entity(underlying, name)
     if not entity:
         log.info(f"  ℹ️  onvista: kein Underlying für {underlying}")
         return []
@@ -455,16 +498,18 @@ VONTOBEL_API = "https://markets.vontobel.com/api/v1"
 VONTOBEL_PURL = ("https://markets.vontobel.com/de-de/produkte/hebel/"
                  "turbo-optionsscheine-open-end/")
 _VT_HEADERS = {"User-Agent": FEED_AGENT, "Accept": "application/json"}
-_VT_KEY_CACHE: dict[str, int | None] = {}
+_VT_KEY_CACHE: dict[tuple, int | None] = {}
 
 
-def _vontobel_underlying_key(underlying: str):
+def _vontobel_underlying_key(underlying: str, name: str | None = None):
     u = underlying.upper()
-    if u in _VT_KEY_CACHE:
-        return _VT_KEY_CACHE[u]
-    company = (ENTITIES.get(u, {}).get("company") or [u])[0]
+    ck = (u, (name or "").lower())
+    if ck in _VT_KEY_CACHE:
+        return _VT_KEY_CACHE[ck]
+    base = u.split(".")[0] if "." in u else u
+    company = name or (ENTITIES.get(u, {}).get("company") or [base])[0]
     key = None
-    for query in (company, u):
+    for query in (company, base):
         try:
             r = requests.get(f"{VONTOBEL_API}/underlyings/search",
                              params={"Query": query, "Page": 0, "PageSize": 5,
@@ -479,17 +524,18 @@ def _vontobel_underlying_key(underlying: str):
                 break
         except Exception as e:
             log.warning(f"  ⚠️  Vontobel Underlying-Suche ({query}): {e}")
-    _VT_KEY_CACHE[u] = key
+    _VT_KEY_CACHE[ck] = key
     return key
 
 
-def fetch_products_vontobel(underlying: str, direction: str) -> list[Product]:
+def fetch_products_vontobel(underlying: str, direction: str,
+                            name: str | None = None) -> list[Product]:
     """Zusätzliche Emittenten-Quelle. BEKANNTE LÜCKE: die kostenlose Vontobel-
     API liefert über /products/search keinen Ask-Preis (nur Bid) — Kandidaten
     von hier fallen daher praktisch immer beim ask>0-Hartfilter raus, bis
     Vontobel selbst einen Ask veröffentlicht. Trotzdem eingebunden (Spec-
     Anforderung + zukunftssicher falls sich die API ändert)."""
-    key = _vontobel_underlying_key(underlying)
+    key = _vontobel_underlying_key(underlying, name)
     if not key:
         return []
     want_dir = 1 if direction == "LONG" else 2
@@ -522,11 +568,12 @@ def fetch_products_vontobel(underlying: str, direction: str) -> list[Product]:
         return []
 
 
-def fetch_all_products(underlying: str, direction: str) -> list[Product]:
-    products = fetch_products_onvista(underlying, direction)
+def fetch_all_products(underlying: str, direction: str,
+                       name: str | None = None) -> list[Product]:
+    products = fetch_products_onvista(underlying, direction, name=name)
     seen = {p.isin for p in products}
     # Vontobel nur ergänzend (liefert keinen Ask) — Duplikate aus onvista verwerfen
-    products += [p for p in fetch_products_vontobel(underlying, direction) if p.isin not in seen]
+    products += [p for p in fetch_products_vontobel(underlying, direction, name) if p.isin not in seen]
     return products
 
 
@@ -1069,7 +1116,7 @@ def select_turbo(signal: MarketSignal, post_time: datetime,
         persist_selection(conn, result, trump_post_id, post_text_hash)
         return result
 
-    raw_products = fetch_all_products(signal.underlying, signal.direction)
+    raw_products = fetch_all_products(signal.underlying, signal.direction, signal.name)
     filtered = apply_hard_filters(raw_products, spot, signal.direction, signal.volatility,
                                   signal.horizon_days, cfg)
     candidates = evaluate_candidates(filtered, signal, cfg)
