@@ -216,7 +216,7 @@ CREATE TABLE IF NOT EXISTS an).
 | `priced_in_fraction` | Schwelle für "bereits eingepreist" |
 | `contradiction_threshold`, `against_reaction_fraction` | Schwellen für "Signal widersprüchlich" (Gegentrend / Gegenreaktion seit Post) |
 | `max_spread_pct`, `max_leverage`, `min_ko_distance_pct`, `min_ko_distance_vol_mult` | harte Produktfilter |
-| `freshness_minutes`, `stale_relax_factor` | Kursfrische während/außerhalb der Handelszeit (grobe Xetra-Heuristik Mo–Fr 07–21 UTC) |
+| `freshness_minutes` | Kursfrische während der Handelszeit (Mo–Fr 07–21 UTC); außerhalb zählt der Kurs des letzten Handelstags (Hinweis in der Mail) |
 | `n_paths`, `mc_seed` | Monte-Carlo-Parameter |
 | `financing_reference_rate`, `financing_issuer_spread`, `short_financing_is_credit` | vereinfachtes Finanzierungskosten-Modell |
 | `uncertainty_shrink`, `conservative_ci_percentile` | Konfidenz-Schrumpfung für die konservative Rendite |

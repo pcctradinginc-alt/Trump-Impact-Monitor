@@ -7158,7 +7158,8 @@ turbo_selector:
   min_ko_distance_pct: 3.0       # absoluter Mindestabstand KO↔Spot in %
   min_ko_distance_vol_mult: 1.0  # zusätzlich: k * HV * sqrt(horizon/252)
   freshness_minutes: 30          # max. Alter des Kurses während Handelszeiten
-  stale_relax_factor: 8          # Faktor für freshness_minutes außerhalb der Handelszeiten (Xetra-Fenster grob 07–21 UTC, Mo–Fr)
+  # Außerhalb der Handelszeit (Mo–Fr 07–21 UTC) zählt der Kurs aus dem Schluss-
+  # fenster des letzten Handelstags (ab 15:00 UTC) als frisch genug.
 
   # ── Monte-Carlo-Parameter (P(KO), Rendite) ───────────────────────────────
   n_paths: 4000

@@ -3891,11 +3891,13 @@ Rules:
 - "underlyings": at most 3, most important first. Empty list if relevant=false.
 - symbol: Yahoo Finance symbol. US stocks as plain ticker (BA, NVDA), foreign stocks with exchange suffix (BAYN.DE, SAP.DE, 005930.KS, ASML.AS). For broad/macro subjects use exactly one of these macro codes: DAX, SPX, NDX, EURUSD, GOLD, BRENT, WTI.
 - kind NAMED = the company is explicitly named in the statement (ALWAYS prefer the named company, even if it is not a US company). SECTOR = company inferred as beneficiary/loser of a sector statement. MACRO = macro code.
+- If a stock-exchange-listed company is explicitly named in a business context (investment, plant, deal, contract, merger, praise or attack by the President, regulation, tariffs, subsidies, government stake), ALWAYS answer relevant=true with that company as NAMED. Do NOT judge whether the move will be big enough — a later stage sizes the effect and may still decide NO TRADE. Only ignore named companies that are media outlets being attacked for their reporting, or that are mentioned purely in passing.
+- Oil: never return both BRENT and WTI — use BRENT unless the statement is specifically about US crude/shale/SPR (then WTI).
 - For commodity (oil, gas, gold), tariff, Fed/interest-rate, currency, sanctions or geopolitics statements return the macro underlying (e.g. more oil supply -> BRENT or WTI SHORT; tariffs on Europe -> DAX SHORT; weaker dollar talk -> EURUSD LONG).
 - Prefer underlyings on which German Turbos exist (DAX/US large caps, indices, oil, gold, EUR/USD). Avoid obscure small caps, ETFs and private companies.
 - direction = expected price reaction of that underlying (LONG = rises, SHORT = falls).
 - relevant=false for pure domestic politics, endorsements of politicians, attacks on media/people, holidays/condolences, sports, and anything without a plausible price impact.
-- Be decisive: relevant=true only if a trader could act on it today."""
+- For statements WITHOUT a named company: relevant=true only if there is a concrete, new policy/market fact (not slogans or general boasting about the economy)."""
 
 
 def parse_triage_json(raw) -> dict:
@@ -3976,6 +3978,15 @@ def pick_underlyings(unders: list[dict], limit: int = 3) -> list[dict]:
     """Welche Underlyings eines triagierten Posts werden analysiert (Sonnet-
     Kosten!): NAMED/MACRO haben Vorrang, SECTOR-Ableitungen nur wenn nichts
     Explizites da ist. Reihenfolge NAMED, MACRO, SECTOR; max. `limit`."""
+    # Brent und WTI sind dasselbe Signal → nur das erste Öl-Underlying behalten
+    seen_oil, deduped = False, []
+    for u in unders:
+        if u["kind"] == "MACRO" and u["symbol"].upper() in ("BRENT", "WTI"):
+            if seen_oil:
+                continue
+            seen_oil = True
+        deduped.append(u)
+    unders = deduped
     primary = [u for u in unders if u["kind"] in ("NAMED", "MACRO")]
     chosen = primary or [u for u in unders if u["kind"] == "SECTOR"]
     rank = {"NAMED": 0, "MACRO": 1, "SECTOR": 2}

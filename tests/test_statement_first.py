@@ -394,3 +394,24 @@ def test_digest_can_be_switched_off(monkeypatch):
     monkeypatch.setattr(m, "DAILY_DIGEST", False)
     m._maybe_send_daily_summary([], 0)
     assert mails == []
+
+
+def test_pick_underlyings_keeps_only_one_oil_macro():
+    unders = [
+        {"symbol": "WTI", "name": "WTI", "kind": "MACRO", "direction": "SHORT"},
+        {"symbol": "BRENT", "name": "Brent", "kind": "MACRO", "direction": "SHORT"},
+        {"symbol": "DAX", "name": "DAX", "kind": "MACRO", "direction": "LONG"},
+    ]
+    picked = [u["symbol"] for u in m.pick_underlyings(unders, 3)]
+    assert picked == ["WTI", "DAX"]
+
+
+def test_weekend_accepts_friday_close_quotes_but_not_older():
+    from datetime import datetime, timezone
+    sunday = datetime(2026, 10, 4, 17, 0, tzinfo=timezone.utc)
+    cutoff = ts._last_session_cutoff(sunday)
+    assert cutoff == datetime(2026, 10, 2, 15, 0, tzinfo=timezone.utc)   # Freitag 15:00 UTC
+    monday_early = datetime(2026, 10, 5, 3, 0, tzinfo=timezone.utc)
+    assert ts._last_session_cutoff(monday_early) == cutoff
+    friday_night = datetime(2026, 10, 2, 22, 30, tzinfo=timezone.utc)
+    assert ts._last_session_cutoff(friday_night) == cutoff

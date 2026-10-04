@@ -582,11 +582,23 @@ def fetch_all_products(underlying: str, direction: str,
 # ─────────────────────────────────────────────────────────────────────────────
 def _is_trading_hours(now: datetime) -> bool:
     """Grobe Xetra/EU-Handelsfenster-Heuristik: Mo–Fr 07–21 UTC. Außerhalb
-    dieses Fensters wird die Frische-Anforderung um stale_relax_factor
-    gelockert (Kurse aktualisieren sich außerbörslich seltener/gar nicht)."""
+    dieses Fensters gilt der Kurs des letzten Handelstags als frisch genug
+    (siehe _last_session_cutoff)."""
     if now.weekday() >= 5:
         return False
     return 7 <= now.hour < 21
+
+
+def _last_session_cutoff(now: datetime) -> datetime:
+    """Außerhalb der Handelszeit (nachts, Wochenende) stellen Emittenten keine
+    neuen Kurse. Ein Kurs gilt dann als frisch genug, wenn er aus dem Schluss-
+    fenster des letzten Handelstags stammt (ab 15:00 UTC). So entsteht auch für
+    Wochenend-Posts eine Empfehlung für die nächste Eröffnung."""
+    day = now
+    # letzter Handelstag, dessen Sitzung schon begonnen hat
+    while day.weekday() >= 5 or (day.date() == now.date() and now.hour < 7):
+        day -= timedelta(days=1)
+    return day.replace(hour=15, minute=0, second=0, microsecond=0)
 
 
 def apply_hard_filters(products: list[Product], spot: float, direction: str,
@@ -622,11 +634,11 @@ def apply_hard_filters(products: list[Product], spot: float, direction: str,
             continue
 
         if p.quote_timestamp is not None:
-            age_min = (now - p.quote_timestamp).total_seconds() / 60.0
-            limit = cfg["freshness_minutes"]
-            if not _is_trading_hours(now):
-                limit *= cfg.get("stale_relax_factor", 4)
-            if age_min > limit:
+            if _is_trading_hours(now):
+                age_min = (now - p.quote_timestamp).total_seconds() / 60.0
+                if age_min > cfg["freshness_minutes"]:
+                    continue
+            elif p.quote_timestamp < _last_session_cutoff(now):
                 continue
 
         out.append(p)
@@ -871,6 +883,9 @@ def render_result(signal: MarketSignal, decision: str, reason: str,
     ]
     if note:
         lines.append(f"MARKTBESTÄTIGUNG:  {note}")
+    if not _is_trading_hours(datetime.now(timezone.utc)):
+        lines.append("HINWEIS:           Außerhalb der Handelszeit – Produktkurse vom letzten "
+                     "Handelstag; vor dem Kauf aktuellen Kurs und KO-Abstand prüfen")
     lines.append(f"RATIONALE:         {signal.rationale}")
     lines.append("─" * 50)
 
