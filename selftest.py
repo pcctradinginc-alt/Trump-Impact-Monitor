@@ -78,6 +78,7 @@ m.TURBO_SELECTOR_CFG["send_no_trade_alerts"] = True
 m.SEND_NO_TRADE = True
 
 errors: list[str] = []
+total_selector_rows = 0
 stamp = int(time.time())
 
 for idx, sample in enumerate(SAMPLES):
@@ -137,7 +138,7 @@ for idx, sample in enumerate(SAMPLES):
         print("Kurzfazit:", kurz)
         if not mm:
             errors.append(f"Post {idx + 1}: Kurzfazit fehlt in der Mail")
-        if not re.search(r"\[(LONG|SHORT|UNKLAR|NO_TRADE)[^\]]*\]", mail["subject"]):
+        if not re.search(r"\[(LONG|SHORT|NO TRADE)[^\]]*\]", mail["subject"]):
             errors.append(f"Post {idx + 1}: Betreff ohne Richtung/Entscheidung")
 
     rows = m.conn.execute(
@@ -149,10 +150,15 @@ for idx, sample in enumerate(SAMPLES):
     print("\n── turbo_selections ────────────────────────────────────")
     for r in rows:
         print(r)
-    if not rows:
-        errors.append(f"Post {idx + 1}: Turbo Selector hat nichts in turbo_selections geschrieben")
+    total_selector_rows += len(rows)
+    # Sonnet darf NO_TRADE urteilen (dann läuft der Selector zu Recht nicht) —
+    # aber bei LONG/SHORT im Betreff muss ein Selector-Eintrag existieren.
+    if not rows and any(re.search(r"\[(LONG|SHORT)", mm_["subject"]) for mm_ in new_mails):
+        errors.append(f"Post {idx + 1}: LONG/SHORT-Signal, aber kein Eintrag in turbo_selections")
 
 print(f"\nHaiku-Calls: {len(haiku_calls)}  Sonnet-Calls: {len(sonnet_calls)}")
+if total_selector_rows == 0:
+    errors.append("Turbo Selector lief bei keinem der Posts (kein Eintrag in turbo_selections)")
 if errors:
     print("\n❌ SELBSTTEST FEHLGESCHLAGEN:", "; ".join(errors))
     sys.exit(1)

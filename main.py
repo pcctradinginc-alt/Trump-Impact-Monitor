@@ -4779,7 +4779,10 @@ RATIONALE: [One sentence: why this direction/magnitude/horizon, tied to the sour
     # Selector-Entscheidung (ACTIONABLE / WATCH / NO TRADE) steht im Betreff:
     # "📈 Trump-Impact – Bayer (BAYN.DE) [LONG · ACTIONABLE] – Truth Social"
     status = decision_label(turbo_selector_decision, direction)
-    dir_part = f"{direction} · {status}" if status else direction
+    if direction not in ("LONG", "SHORT"):
+        dir_part = "NO TRADE"
+    else:
+        dir_part = f"{direction} · {status}" if status else direction
     subject   = f"{dir_emoji} Trump-Impact – {subject_label}{conf_tag}{hold_tag} [{dir_part}] – {source}"
     sent = send_gmail(subject, html_body)
     if sent:
